@@ -1,0 +1,26 @@
+-- Management Panel: simulated facilities for investor view
+CREATE TABLE IF NOT EXISTS `simulated_facilities` (
+  `id` VARCHAR(36) NOT NULL PRIMARY KEY,
+  `name` VARCHAR(255) NOT NULL,
+  `location` VARCHAR(255) NOT NULL,
+  `region` VARCHAR(100) NOT NULL,
+  `status` VARCHAR(50) NOT NULL DEFAULT 'active',
+  `solar_status` VARCHAR(50) NOT NULL DEFAULT 'operational',
+  `payg_status` VARCHAR(50) NOT NULL DEFAULT 'operational',
+  `installation_date` DATE NOT NULL,
+  `payg_operational_date` DATE NOT NULL,
+  `energy_consumption_before` INT NOT NULL,
+  `energy_consumption_after` INT NOT NULL,
+  `monthly_energy_savings` INT NOT NULL,
+  `electricity_cost_before` DECIMAL(12,2) NOT NULL,
+  `electricity_cost_after` DECIMAL(12,2) NOT NULL,
+  `monthly_cost_savings` DECIMAL(12,2) NOT NULL,
+  `carbon_emission_reduction` INT NOT NULL,
+  `solar_capacity` INT NOT NULL,
+  `battery_capacity` INT NOT NULL,
+  `smart_meter_serial` VARCHAR(100) NOT NULL,
+  `facility_type` VARCHAR(100) NOT NULL,
+  `notes` TEXT,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

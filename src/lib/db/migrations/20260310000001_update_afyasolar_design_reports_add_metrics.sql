@@ -1,0 +1,27 @@
+-- Extend afyasolar_design_reports with detailed metrics to mirror the Design & Finance report
+ALTER TABLE `afyasolar_design_reports`
+  ADD COLUMN `total_daily_energy_kwh` DECIMAL(10,2) NULL,
+  ADD COLUMN `critical_energy_kwh` DECIMAL(10,2) NULL,
+  ADD COLUMN `adjusted_daily_energy_kwh` DECIMAL(10,2) NULL,
+  ADD COLUMN `num_panels` BIGINT UNSIGNED NULL,
+  ADD COLUMN `battery_ah` DECIMAL(12,2) NULL,
+  ADD COLUMN `inverter_kw` DECIMAL(8,2) NULL,
+  ADD COLUMN `mppt_current_a` DECIMAL(10,2) NULL,
+  ADD COLUMN `baseline_grid_monthly` BIGINT NULL,
+  ADD COLUMN `baseline_diesel_monthly` BIGINT NULL,
+  ADD COLUMN `baseline_total_monthly` BIGINT NULL,
+  ADD COLUMN `after_grid_monthly` BIGINT NULL,
+  ADD COLUMN `after_diesel_monthly` BIGINT NULL,
+  ADD COLUMN `after_total_monthly` BIGINT NULL,
+  ADD COLUMN `cash_price_tzs` BIGINT NULL,
+  ADD COLUMN `cash_payback_months` DECIMAL(10,2) NULL,
+  ADD COLUMN `installment_upfront_tzs` BIGINT NULL,
+  ADD COLUMN `installment_monthly_tzs` BIGINT NULL,
+  ADD COLUMN `installment_term_months` BIGINT NULL,
+  ADD COLUMN `installment_net_savings_tzs` BIGINT NULL,
+  ADD COLUMN `installment_breakeven_months` DECIMAL(10,2) NULL,
+  ADD COLUMN `eaas_monthly_tzs` BIGINT NULL,
+  ADD COLUMN `eaas_term_months` BIGINT NULL,
+  ADD COLUMN `eaas_net_savings_tzs` BIGINT NULL,
+  ADD COLUMN `meu_total_daily_load_kwh` DECIMAL(10,2) NULL;
+

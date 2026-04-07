@@ -1,0 +1,36 @@
+{
+  "name": "Afya Solar",
+  "short_name": "Afya Solar",
+  "description": "Solar energy systems and facility energy dashboards for healthcare facilities in Tanzania.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#16a34a",
+  "orientation": "portrait-primary",
+  "scope": "/",
+  "icons": [
+    {
+      "src": "/images/services/logo.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/images/services/logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["healthcare", "medical", "business"],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "Afya Solar",
+      "short_name": "Solar",
+      "description": "Access Afya Solar dashboard",
+      "url": "/services/afya-solar",
+      "icons": [{ "src": "/images/services/logo.png", "sizes": "192x192" }]
+    }
+  ]
+}
