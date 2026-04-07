@@ -268,3 +268,111 @@ export const afyaSolarDesignReports = mysqlTable('afyasolar_design_reports', {
   createdIdx: index('idx_design_reports_created').on(table.createdAt),
 }))
 
+// ============================================================
+// Microgrid + Tariffs + Meter readings (Design-to-prod additions)
+// ============================================================
+
+export const afyaSolarFacilityTariffs = mysqlTable('afyasolar_facility_tariffs', {
+  id: bigint('id', { mode: 'number', unsigned: true }).primaryKey().autoincrement(),
+  facilityId: varchar('facility_id', { length: 36 }).notNull(),
+  currency: varchar('currency', { length: 3 }).notNull().default('TZS'),
+  pricePerKwh: decimal('price_per_kwh', { precision: 12, scale: 2 }).notNull(),
+  peakPricePerKwh: decimal('peak_price_per_kwh', { precision: 12, scale: 2 }),
+  offPeakPricePerKwh: decimal('off_peak_price_per_kwh', { precision: 12, scale: 2 }),
+  minimumTopUp: decimal('minimum_top_up', { precision: 12, scale: 2 }),
+  connectionFee: decimal('connection_fee', { precision: 12, scale: 2 }),
+  effectiveFrom: timestamp('effective_from').defaultNow(),
+  effectiveTo: timestamp('effective_to'),
+  isActive: tinyint('is_active').notNull().default(1),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').onUpdateNow(),
+}, (table) => ({
+  facilityIdx: index('idx_mg_tariff_facility').on(table.facilityId),
+  activeIdx: index('idx_mg_tariff_active').on(table.isActive, table.effectiveFrom),
+}))
+
+export const afyaSolarMicrogridFacilities = mysqlTable('afyasolar_microgrid_facilities', {
+  id: bigint('id', { mode: 'number', unsigned: true }).primaryKey().autoincrement(),
+  facilityId: varchar('facility_id', { length: 36 }).notNull(),
+  name: varchar('name', { length: 150 }).notNull(),
+  exportCapacityKw: decimal('export_capacity_kw', { precision: 10, scale: 2 }).notNull().default('0'),
+  tariffId: bigint('tariff_id', { mode: 'number', unsigned: true }),
+  status: varchar('status', { length: 30 }).notNull().default('ACTIVE'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').onUpdateNow(),
+}, (table) => ({
+  facilityIdx: index('idx_mg_facility_facility').on(table.facilityId),
+  statusIdx: index('idx_mg_facility_status').on(table.status),
+}))
+
+export const afyaSolarMicrogridConsumers = mysqlTable('afyasolar_microgrid_consumers', {
+  id: bigint('id', { mode: 'number', unsigned: true }).primaryKey().autoincrement(),
+  microgridFacilityId: bigint('microgrid_facility_id', { mode: 'number', unsigned: true }).notNull(),
+  consumerCode: varchar('consumer_code', { length: 80 }).notNull().unique(),
+  name: varchar('name', { length: 150 }).notNull(),
+  type: varchar('type', { length: 40 }).notNull(),
+  smartmeterId: bigint('smartmeter_id', { mode: 'number', unsigned: true }),
+  phoneNumber: varchar('phone_number', { length: 30 }),
+  address: varchar('address', { length: 255 }),
+  tariffRate: decimal('tariff_rate', { precision: 12, scale: 2 }).notNull(),
+  creditBalance: decimal('credit_balance', { precision: 14, scale: 2 }).notNull().default('0'),
+  outstandingBalance: decimal('outstanding_balance', { precision: 14, scale: 2 }).notNull().default('0'),
+  status: varchar('status', { length: 30 }).notNull().default('ACTIVE'),
+  connectedAt: timestamp('connected_at').defaultNow(),
+  lastPaymentAt: timestamp('last_payment_at'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').onUpdateNow(),
+}, (table) => ({
+  facilityIdx: index('idx_mg_consumer_facility').on(table.microgridFacilityId),
+  meterIdx: index('idx_mg_consumer_meter').on(table.smartmeterId),
+  statusIdx: index('idx_mg_consumer_status').on(table.status),
+}))
+
+export const afyaSolarMicrogridUsageRecords = mysqlTable('afyasolar_microgrid_usage_records', {
+  id: bigint('id', { mode: 'number', unsigned: true }).primaryKey().autoincrement(),
+  consumerId: bigint('consumer_id', { mode: 'number', unsigned: true }).notNull(),
+  occurredAt: timestamp('occurred_at').defaultNow(),
+  energyKwh: decimal('energy_kwh', { precision: 12, scale: 4 }).notNull(),
+  costTzs: decimal('cost_tzs', { precision: 14, scale: 2 }).notNull(),
+  paymentStatus: varchar('payment_status', { length: 20 }).notNull().default('pending'),
+  createdAt: timestamp('created_at').defaultNow(),
+}, (table) => ({
+  consumerIdx: index('idx_mg_usage_consumer').on(table.consumerId, table.occurredAt),
+  statusIdx: index('idx_mg_usage_status').on(table.paymentStatus),
+}))
+
+export const afyaSolarMeterReadings = mysqlTable('afyasolar_meter_readings', {
+  id: bigint('id', { mode: 'number', unsigned: true }).primaryKey().autoincrement(),
+  smartmeterId: bigint('smartmeter_id', { mode: 'number', unsigned: true }).notNull(),
+  recordedAt: timestamp('recorded_at').defaultNow(),
+  voltage: decimal('voltage', { precision: 10, scale: 2 }),
+  current: decimal('current', { precision: 10, scale: 2 }),
+  power: decimal('power', { precision: 12, scale: 2 }),
+  energy: decimal('energy', { precision: 14, scale: 3 }),
+  powerFactor: decimal('power_factor', { precision: 6, scale: 3 }),
+  relayStatus: varchar('relay_status', { length: 10 }),
+  creditBalance: decimal('credit_balance', { precision: 14, scale: 2 }),
+  status: varchar('status', { length: 20 }).default('unknown'),
+  rawPayload: text('raw_payload'),
+  createdAt: timestamp('created_at').defaultNow(),
+}, (table) => ({
+  meterIdx: index('idx_meter_readings_meter').on(table.smartmeterId, table.recordedAt),
+  statusIdx: index('idx_meter_readings_status').on(table.status),
+}))
+
+export const afyaSolarRelayActions = mysqlTable('afyasolar_relay_actions', {
+  id: bigint('id', { mode: 'number', unsigned: true }).primaryKey().autoincrement(),
+  smartmeterId: bigint('smartmeter_id', { mode: 'number', unsigned: true }).notNull(),
+  clientServiceId: bigint('client_service_id', { mode: 'number', unsigned: true }),
+  action: varchar('action', { length: 10 }).notNull(), // on | off
+  requestedByUserId: varchar('requested_by_user_id', { length: 36 }),
+  reasonCode: varchar('reason_code', { length: 30 }),
+  reasonText: varchar('reason_text', { length: 255 }),
+  result: varchar('result', { length: 20 }).notNull().default('queued'),
+  errorMessage: varchar('error_message', { length: 255 }),
+  createdAt: timestamp('created_at').defaultNow(),
+}, (table) => ({
+  meterIdx: index('idx_relay_actions_meter').on(table.smartmeterId, table.createdAt),
+  resultIdx: index('idx_relay_actions_result').on(table.result),
+}))
+

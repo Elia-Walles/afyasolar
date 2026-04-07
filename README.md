@@ -1,4 +1,4 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+AfyaSolar is a Next.js (App Router) platform for healthcare-facility solar services, monitoring, and related operational tooling.
 
 ## Getting Started
 
@@ -16,7 +16,23 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Key routes (new-version additions)
+
+- **Demo dashboards (token-based)**:
+  - `/demo/[token]`
+  - `/demo/facility/[token]`
+  - `/demo/microgrid/[token]`
+
+Demo seed data and tokens are defined in `src/lib/facility-data.ts`.
+
+### Design/guideline documentation
+
+See `docs/`:
+
+- `docs/SIMPLIFIED_SYSTEM_ARCHITECTURE.md`
+- `docs/DEMO_ACCESS_GUIDE.md`
+- `docs/CARBON_CALCULATOR_METHODOLOGY.md`
+- `docs/METER_CUSTOMIZATION_REQUEST.md`
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
