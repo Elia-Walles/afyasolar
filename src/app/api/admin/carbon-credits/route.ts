@@ -2,10 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/config'
 import { db } from '@/lib/db'
-import { devices, facilities } from '@/lib/db/schema'
-import { eq, and, desc, gte, lte } from 'drizzle-orm'
+import { carbonCredits, devices, facilities } from '@/lib/db/schema'
+import { eq, and, desc } from 'drizzle-orm'
 import { generateId } from '@/lib/utils'
-import { format, subDays, startOfDay, endOfDay } from 'date-fns'
 
 interface CarbonCredit {
   id: string
@@ -38,14 +37,16 @@ interface CarbonCredit {
   }
 }
 
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 /**
  * GET /api/admin/carbon-credits
- * Get all carbon credits with filtering and pagination
+ * DB-backed carbon credits list with filters/pagination.
  */
 export async function GET(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
-
     if (!session || session.user.role !== 'admin') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
@@ -59,21 +60,65 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '20')
     const offset = (page - 1) * limit
 
-    // In a real implementation, fetch from carbon_credits table
-    const carbonCredits = await getCarbonCredits(facilityId, deviceId, status, period, limit, offset)
-    const totalCount = await getCarbonCreditsCount(facilityId, deviceId, status, period)
+    const conditions: any[] = []
+    if (facilityId) conditions.push(eq(carbonCredits.facilityId, facilityId))
+    if (deviceId) conditions.push(eq(carbonCredits.deviceId, deviceId))
+    if (status) conditions.push(eq(carbonCredits.verificationStatus, status))
+    if (period) conditions.push(eq(carbonCredits.period, period))
+    const whereClause = conditions.length ? and(...conditions) : undefined
+
+    const rows = await db
+      .select({
+        credit: carbonCredits,
+        facilityName: facilities.name,
+        deviceSerial: devices.serialNumber,
+      })
+      .from(carbonCredits)
+      .leftJoin(facilities, eq(carbonCredits.facilityId, facilities.id))
+      .leftJoin(devices, eq(carbonCredits.deviceId, devices.id))
+      .where(whereClause as any)
+      .orderBy(desc(carbonCredits.createdAt))
+      .limit(limit)
+      .offset(offset)
+
+    const out: CarbonCredit[] = rows.map((r: any) => ({
+      id: r.credit.id,
+      deviceId: r.credit.deviceId,
+      facilityId: r.credit.facilityId,
+      facilityName: r.facilityName || 'Unknown Facility',
+      deviceSerial: r.deviceSerial || 'Unknown Device',
+      period: r.credit.period,
+      startDate: new Date(r.credit.startDate).toISOString(),
+      endDate: new Date(r.credit.endDate).toISOString(),
+      energyGenerated: Number(r.credit.energyGeneratedKwh ?? 0),
+      co2Saved: Number(r.credit.co2SavedKg ?? 0),
+      creditsEarned: Number(r.credit.creditsEarnedTons ?? 0),
+      creditValue: Number(r.credit.creditValueUsd ?? 0),
+      totalValue: Number(r.credit.totalValueUsd ?? 0),
+      verificationStatus: r.credit.verificationStatus,
+      certificateId: r.credit.certificateId ?? undefined,
+      verifiedAt: r.credit.verifiedAt ? new Date(r.credit.verifiedAt).toISOString() : undefined,
+      verifiedBy: r.credit.verifiedBy ?? undefined,
+      notes: r.credit.notes ?? undefined,
+      createdAt: new Date(r.credit.createdAt).toISOString(),
+      updatedAt: new Date(r.credit.updatedAt).toISOString(),
+      metadata: (r.credit.metadata ?? {}) as any,
+    }))
+
+    // Basic total count (keeps compatibility with existing UI pagination)
+    const totalRows = await db.select().from(carbonCredits).where(whereClause as any)
+    const total = Array.isArray(totalRows) ? totalRows.length : 0
 
     return NextResponse.json({
       success: true,
-      data: carbonCredits,
+      data: out,
       pagination: {
         page,
         limit,
-        total: totalCount,
-        pages: Math.ceil(totalCount / limit)
-      }
+        total,
+        pages: Math.ceil(total / limit),
+      },
     })
-
   } catch (error) {
     console.error('Error fetching carbon credits:', error)
     return NextResponse.json(
@@ -85,12 +130,11 @@ export async function GET(request: NextRequest) {
 
 /**
  * POST /api/admin/carbon-credits
- * Create a new carbon credit record
+ * Create a carbon credit record (manual entry).
  */
 export async function POST(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
-
     if (!session || session.user.role !== 'admin') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
@@ -107,21 +151,17 @@ export async function POST(request: NextRequest) {
       creditsEarned,
       creditValue,
       totalValue,
-      metadata
+      metadata,
     } = body
 
-    // Validate required fields
     if (!deviceId || !facilityId || !period || !startDate || !endDate) {
-      return NextResponse.json({
-        error: 'Missing required fields'
-      }, { status: 400 })
+      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
     }
 
-    // Get device and facility information
     const deviceInfo = await db
       .select({
         device: devices,
-        facility: facilities
+        facility: facilities,
       })
       .from(devices)
       .leftJoin(facilities, eq(devices.facilityId, facilities.id))
@@ -134,9 +174,34 @@ export async function POST(request: NextRequest) {
 
     const { device, facility } = deviceInfo[0]
 
-    // Create carbon credit record
-    const carbonCredit: CarbonCredit = {
-      id: generateId(),
+    const id = generateId()
+    await db.insert(carbonCredits).values({
+      id,
+      deviceId,
+      facilityId,
+      period,
+      startDate: new Date(startDate),
+      endDate: new Date(endDate),
+      energyGeneratedKwh: (Number(energyGenerated) || 0).toString(),
+      co2SavedKg: (Number(co2Saved) || 0).toString(),
+      creditsEarnedTons: (Number(creditsEarned) || 0).toString(),
+      creditValueUsd: (Number(creditValue) || 0).toString(),
+      totalValueUsd: (Number(totalValue) || 0).toString(),
+      verificationStatus: 'pending',
+      metadata: {
+        efficiency: metadata?.efficiency || 0,
+        operatingHours: metadata?.operatingHours || 0,
+        baselineEmissions: metadata?.baselineEmissions || 0,
+        gridEmissionFactor: metadata?.gridEmissionFactor || 0.5,
+        calculationMethod: metadata?.calculationMethod || 'ACM0002',
+        verificationDocuments: metadata?.verificationDocuments || [],
+      } as any,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+
+    const out: CarbonCredit = {
+      id,
       deviceId,
       facilityId,
       facilityName: facility?.name || 'Unknown Facility',
@@ -144,11 +209,11 @@ export async function POST(request: NextRequest) {
       period,
       startDate,
       endDate,
-      energyGenerated,
-      co2Saved,
-      creditsEarned,
-      creditValue,
-      totalValue,
+      energyGenerated: Number(energyGenerated) || 0,
+      co2Saved: Number(co2Saved) || 0,
+      creditsEarned: Number(creditsEarned) || 0,
+      creditValue: Number(creditValue) || 0,
+      totalValue: Number(totalValue) || 0,
       verificationStatus: 'pending',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -158,19 +223,11 @@ export async function POST(request: NextRequest) {
         baselineEmissions: metadata?.baselineEmissions || 0,
         gridEmissionFactor: metadata?.gridEmissionFactor || 0.5,
         calculationMethod: metadata?.calculationMethod || 'ACM0002',
-        verificationDocuments: metadata?.verificationDocuments || []
-      }
+        verificationDocuments: metadata?.verificationDocuments || [],
+      },
     }
 
-    // In a real implementation, save to database
-    console.log('Creating carbon credit:', carbonCredit)
-
-    return NextResponse.json({
-      success: true,
-      data: carbonCredit,
-      message: 'Carbon credit created successfully'
-    })
-
+    return NextResponse.json({ success: true, data: out, message: 'Carbon credit created successfully' })
   } catch (error) {
     console.error('Error creating carbon credit:', error)
     return NextResponse.json(
@@ -178,112 +235,4 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     )
   }
-}
-
-/**
- * Mock function to get carbon credits
- */
-async function getCarbonCredits(
-  facilityId?: string | null,
-  deviceId?: string | null,
-  status?: string | null,
-  period?: string | null,
-  limit: number = 20,
-  offset: number = 0
-): Promise<CarbonCredit[]> {
-  // Mock data - in real implementation, fetch from database
-  const mockCredits: CarbonCredit[] = [
-    {
-      id: 'credit-1',
-      deviceId: 'device-1',
-      facilityId: 'fac-1',
-      facilityName: 'Kigali Central Hospital',
-      deviceSerial: 'SN-001-AFYA',
-      period: '2024-01',
-      startDate: '2024-01-01',
-      endDate: '2024-01-31',
-      energyGenerated: 1240.5,
-      co2Saved: 620.25,
-      creditsEarned: 0.62,
-      creditValue: 25,
-      totalValue: 15.5,
-      verificationStatus: 'certified',
-      certificateId: 'CC-2024-001',
-      verifiedAt: '2024-02-15T10:30:00Z',
-      verifiedBy: 'admin@afyalink.com',
-      createdAt: '2024-02-01T00:00:00Z',
-      updatedAt: '2024-02-15T10:30:00Z',
-      metadata: {
-        efficiency: 94.5,
-        operatingHours: 720,
-        baselineEmissions: 620.25,
-        gridEmissionFactor: 0.5,
-        calculationMethod: 'ACM0002',
-        verificationDocuments: ['doc1.pdf', 'doc2.pdf']
-      }
-    },
-    {
-      id: 'credit-2',
-      deviceId: 'device-2',
-      facilityId: 'fac-2',
-      facilityName: 'Muhanga Health Center',
-      deviceSerial: 'SN-002-AFYA',
-      period: '2024-01',
-      startDate: '2024-01-01',
-      endDate: '2024-01-31',
-      energyGenerated: 980.2,
-      co2Saved: 490.1,
-      creditsEarned: 0.49,
-      creditValue: 25,
-      totalValue: 12.25,
-      verificationStatus: 'verified',
-      verifiedAt: '2024-02-10T14:20:00Z',
-      verifiedBy: 'admin@afyalink.com',
-      createdAt: '2024-02-01T00:00:00Z',
-      updatedAt: '2024-02-10T14:20:00Z',
-      metadata: {
-        efficiency: 91.2,
-        operatingHours: 680,
-        baselineEmissions: 490.1,
-        gridEmissionFactor: 0.5,
-        calculationMethod: 'ACM0002',
-        verificationDocuments: ['doc3.pdf']
-      }
-    }
-  ]
-
-  // Apply filters
-  let filteredCredits = mockCredits
-
-  if (facilityId) {
-    filteredCredits = filteredCredits.filter(credit => credit.facilityId === facilityId)
-  }
-
-  if (deviceId) {
-    filteredCredits = filteredCredits.filter(credit => credit.deviceId === deviceId)
-  }
-
-  if (status) {
-    filteredCredits = filteredCredits.filter(credit => credit.verificationStatus === status)
-  }
-
-  if (period) {
-    filteredCredits = filteredCredits.filter(credit => credit.period === period)
-  }
-
-  return filteredCredits.slice(offset, offset + limit)
-}
-
-/**
- * Mock function to get carbon credits count
- */
-async function getCarbonCreditsCount(
-  facilityId?: string | null,
-  deviceId?: string | null,
-  status?: string | null,
-  period?: string | null
-): Promise<number> {
-  // In real implementation, use COUNT query
-  const credits = await getCarbonCredits(facilityId, deviceId, status, period, 1000, 0)
-  return credits.length
 }

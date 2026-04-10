@@ -2,12 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/config'
 import { db } from '@/lib/db'
-import { deviceTelemetry, deviceHealth, devices, facilities } from '@/lib/db/schema'
+import { carbonCredits, deviceTelemetry, devices } from '@/lib/db/schema'
 import { eq, and, gte, lte, desc } from 'drizzle-orm'
 import { generateId } from '@/lib/utils'
-import { format, subDays, subMonths, startOfDay, endOfDay } from 'date-fns'
 
 interface CarbonCreditCalculation {
+  id: string
   deviceId: string
   facilityId: string
   period: string
@@ -26,6 +26,7 @@ interface CarbonCreditCalculation {
     gridEmissionFactor: number
     calculationMethod: string
   }
+  createdAt: string
 }
 
 /**
@@ -51,10 +52,23 @@ export async function POST(request: NextRequest) {
     } = body
 
     // Validate input
-    if (!deviceId || !period || !startDate || !endDate) {
+    if (!deviceId || !facilityId || !period || !startDate || !endDate) {
       return NextResponse.json({ 
-        error: 'Missing required fields: deviceId, period, startDate, endDate' 
+        error: 'Missing required fields: deviceId, facilityId, period, startDate, endDate' 
       }, { status: 400 })
+    }
+
+    const [deviceRow] = await db
+      .select({ id: devices.id, facilityId: devices.facilityId })
+      .from(devices)
+      .where(eq(devices.id, deviceId))
+      .limit(1)
+
+    if (!deviceRow) {
+      return NextResponse.json({ error: 'Device not found' }, { status: 404 })
+    }
+    if (deviceRow.facilityId !== facilityId) {
+      return NextResponse.json({ error: 'Device does not belong to facility' }, { status: 400 })
     }
 
     // Get telemetry data for the period
@@ -75,7 +89,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Calculate carbon credits
-    const calculation = await calculateCarbonCredits(
+    const calculation = calculateCarbonCredits(
       deviceId, 
       facilityId, 
       period, 
@@ -84,6 +98,24 @@ export async function POST(request: NextRequest) {
       telemetryData, 
       gridEmissionFactor
     )
+
+    await db.insert(carbonCredits).values({
+      id: calculation.id,
+      deviceId: calculation.deviceId,
+      facilityId: calculation.facilityId,
+      period: calculation.period,
+      startDate: new Date(calculation.startDate),
+      endDate: new Date(calculation.endDate),
+      energyGeneratedKwh: calculation.energyGenerated.toString(),
+      co2SavedKg: calculation.co2Saved.toString(),
+      creditsEarnedTons: calculation.creditsEarned.toString(),
+      creditValueUsd: calculation.creditValue.toString(),
+      totalValueUsd: calculation.totalValue.toString(),
+      verificationStatus: calculation.verificationStatus,
+      metadata: calculation.metadata as any,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
 
     return NextResponse.json({
       success: true,
@@ -117,9 +149,37 @@ export async function GET(request: NextRequest) {
     const period = searchParams.get('period') || 'monthly'
     const limit = parseInt(searchParams.get('limit') || '12')
 
-    // In a real implementation, you would fetch from a carbon_credits table
-    // For now, return mock data based on recent telemetry
-    const calculations = await getCarbonCreditCalculations(deviceId, facilityId, period, limit)
+    if (!facilityId) {
+      return NextResponse.json({ error: 'facilityId required' }, { status: 400 })
+    }
+
+    const conditions = [eq(carbonCredits.facilityId, facilityId)]
+    if (deviceId) conditions.push(eq(carbonCredits.deviceId, deviceId))
+    if (period && period !== 'all') conditions.push(eq(carbonCredits.period, period))
+
+    const rows = await db
+      .select()
+      .from(carbonCredits)
+      .where(and(...conditions))
+      .orderBy(desc(carbonCredits.createdAt))
+      .limit(limit)
+
+    const calculations: CarbonCreditCalculation[] = rows.map((r: any) => ({
+      id: r.id,
+      deviceId: r.deviceId,
+      facilityId: r.facilityId,
+      period: r.period,
+      startDate: new Date(r.startDate).toISOString(),
+      endDate: new Date(r.endDate).toISOString(),
+      energyGenerated: Number(r.energyGeneratedKwh ?? 0),
+      co2Saved: Number(r.co2SavedKg ?? 0),
+      creditsEarned: Number(r.creditsEarnedTons ?? 0),
+      creditValue: Number(r.creditValueUsd ?? 0),
+      totalValue: Number(r.totalValueUsd ?? 0),
+      verificationStatus: r.verificationStatus,
+      metadata: (r.metadata ?? {}) as any,
+      createdAt: new Date(r.createdAt).toISOString(),
+    }))
 
     return NextResponse.json({
       success: true,
@@ -138,7 +198,7 @@ export async function GET(request: NextRequest) {
 /**
  * Calculate carbon credits based on telemetry data
  */
-async function calculateCarbonCredits(
+function calculateCarbonCredits(
   deviceId: string,
   facilityId: string,
   period: string,
@@ -146,10 +206,16 @@ async function calculateCarbonCredits(
   endDate: string,
   telemetryData: any[],
   gridEmissionFactor: number
-): Promise<CarbonCreditCalculation> {
-  // Calculate total energy generated
+): CarbonCreditCalculation {
+  const timestamps = telemetryData
+    .map((t) => (t?.timestamp ? new Date(t.timestamp).getTime() : NaN))
+    .filter((n: number) => Number.isFinite(n))
+  const minTs = timestamps.length ? Math.min(...timestamps) : NaN
+  const maxTs = timestamps.length ? Math.max(...timestamps) : NaN
+
   const energyGenerated = telemetryData.reduce((sum, data) => {
-    return sum + (Number(data.power || 0) * (data.interval || 1)) / 1000 // Convert to kWh
+    const v = data?.solarGeneration ?? data?.energy ?? 0
+    return sum + Number(v || 0)
   }, 0)
 
   // Calculate CO2 savings
@@ -164,16 +230,19 @@ async function calculateCarbonCredits(
   const totalValue = creditsEarned * creditValue
 
   // Calculate average efficiency
-  const efficiency = telemetryData.reduce((sum, data) => 
-    sum + (Number(data.efficiency) || 0), 0) / telemetryData.length
+  const efficiency =
+    telemetryData.length > 0
+      ? telemetryData.reduce((sum, data) => sum + (Number(data.efficiency) || 0), 0) / telemetryData.length
+      : 0
 
   // Calculate operating hours
-  const operatingHours = telemetryData.length * (telemetryData[0]?.interval || 1) / 60
+  const operatingHours = Number.isFinite(minTs) && Number.isFinite(maxTs) ? Math.max(0, (maxTs - minTs) / 36e5) : 0
 
   // Baseline emissions (what would have been emitted without solar)
   const baselineEmissions = energyGenerated * gridEmissionFactor
 
   const calculation: CarbonCreditCalculation = {
+    id: generateId(),
     deviceId,
     facilityId,
     period,
@@ -191,68 +260,13 @@ async function calculateCarbonCredits(
       baselineEmissions: Math.round(baselineEmissions * 100) / 100,
       gridEmissionFactor,
       calculationMethod: 'ACM0002' // Approved Carbon Methodology
-    }
+    },
+    createdAt: new Date().toISOString(),
   }
 
   return calculation
 }
 
-/**
- * Get existing carbon credit calculations
- */
-async function getCarbonCreditCalculations(
-  deviceId?: string | null,
-  facilityId?: string | null,
-  period: string = 'monthly',
-  limit: number = 12
-): Promise<CarbonCreditCalculation[]> {
-  // In a real implementation, fetch from database
-  // For now, return mock data
-  const mockCalculations: CarbonCreditCalculation[] = [
-    {
-      deviceId: deviceId || 'device-1',
-      facilityId: facilityId || 'fac-1',
-      period: '2024-01',
-      startDate: '2024-01-01',
-      endDate: '2024-01-31',
-      energyGenerated: 1240.5,
-      co2Saved: 620.25,
-      creditsEarned: 0.62,
-      creditValue: 25,
-      totalValue: 15.5,
-      verificationStatus: 'certified',
-      metadata: {
-        efficiency: 94.5,
-        operatingHours: 720,
-        baselineEmissions: 620.25,
-        gridEmissionFactor: 0.5,
-        calculationMethod: 'ACM0002'
-      }
-    },
-    {
-      deviceId: deviceId || 'device-1',
-      facilityId: facilityId || 'fac-1',
-      period: '2024-02',
-      startDate: '2024-02-01',
-      endDate: '2024-02-29',
-      energyGenerated: 1180.2,
-      co2Saved: 590.1,
-      creditsEarned: 0.59,
-      creditValue: 25,
-      totalValue: 14.75,
-      verificationStatus: 'verified',
-      metadata: {
-        efficiency: 92.8,
-        operatingHours: 680,
-        baselineEmissions: 590.1,
-        gridEmissionFactor: 0.5,
-        calculationMethod: 'ACM0002'
-      }
-    }
-  ]
-
-  return mockCalculations.slice(0, limit)
-}
 
 /**
  * PUT /api/admin/carbon-credits/verify

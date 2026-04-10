@@ -6,3 +6,7 @@
 .DS_Store
 certs/
 
+# local/editor artifacts
+.cursor/
+tsconfig.tsbuildinfo
+

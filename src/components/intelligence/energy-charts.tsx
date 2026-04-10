@@ -6,9 +6,13 @@ import {
   CartesianGrid,
   Cell,
   Legend,
+  Line,
+  LineChart,
   Pie,
   PieChart,
   ResponsiveContainer,
+  Scatter,
+  ScatterChart,
   Tooltip,
   XAxis,
   YAxis,
@@ -16,6 +20,7 @@ import {
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import type { MeuSummary, SizingSummary } from "@/components/solar/afya-solar-sizing-tool"
 import { formatCurrency } from "@/lib/utils"
+import type { IntelligenceRecommendation } from "@/lib/intelligence/recommendations"
 
 const GREEN = "#16a34a"
 const GREEN_LIGHT = "#86efac"
@@ -203,10 +208,213 @@ export function SavingsWaterfallSimplified({
   )
 }
 
+export function OutageExposureTimeline({
+  outageHoursPerDay,
+  backupHoursAvailable,
+}: {
+  outageHoursPerDay: number
+  backupHoursAvailable: number
+}) {
+  const outage = Math.max(0, Math.min(24, outageHoursPerDay))
+  const backup = Math.max(0, Math.min(24, backupHoursAvailable))
+  const unprotected = Math.max(0, outage - backup)
+
+  const data = [
+    {
+      label: "Daily exposure (hours)",
+      outage,
+      backup: Math.min(outage, backup),
+      unprotected,
+    },
+  ]
+
+  if (outage <= 0) {
+    return <ChartFallback message="Add outage hours/day to see exposure and unprotected hours." />
+  }
+
+  return (
+    <ResponsiveContainer width="100%" height={220}>
+      <BarChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
+        <CartesianGrid strokeDasharray="3 3" className="stroke-emerald-100" />
+        <XAxis dataKey="label" tick={{ fontSize: 10 }} />
+        <YAxis unit=" h" tick={{ fontSize: 10 }} domain={[0, 24]} />
+        <Tooltip />
+        <Legend wrapperStyle={{ fontSize: 11 }} />
+        <Bar dataKey="backup" stackId="a" fill={EMERALD} name="Backup covered" />
+        <Bar dataKey="unprotected" stackId="a" fill="#dc2626" name="Unprotected outage" />
+      </BarChart>
+    </ResponsiveContainer>
+  )
+}
+
+export function SolarCoverageSimulationChart({
+  sizing,
+}: {
+  sizing: SizingSummary | null
+}) {
+  if (!sizing || sizing.totalDailyLoad <= 0) {
+    return <ChartFallback message="Run the design engine to see a solar + battery coverage simulation." />
+  }
+
+  const demand = sizing.totalDailyLoad
+  // Simple illustrative split: solar covers 55%, battery covers 20%, remainder grid/diesel.
+  // This is intentionally a visualization aid; the sizing engine remains source-of-truth.
+  const solar = demand * 0.55
+  const battery = demand * 0.2
+  const remaining = Math.max(0, demand - solar - battery)
+
+  const data = [
+    { name: "Daily demand", value: Number(demand.toFixed(2)), fill: "#0f172a" },
+    { name: "Solar daytime offset (est.)", value: Number(solar.toFixed(2)), fill: GREEN },
+    { name: "Battery backup (est.)", value: Number(battery.toFixed(2)), fill: EMERALD },
+    { name: "Grid/diesel remainder (est.)", value: Number(remaining.toFixed(2)), fill: "#f59e0b" },
+  ]
+
+  return (
+    <ResponsiveContainer width="100%" height={240}>
+      <BarChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 40 }}>
+        <CartesianGrid strokeDasharray="3 3" className="stroke-emerald-100" />
+        <XAxis dataKey="name" interval={0} angle={-14} textAnchor="end" height={62} tick={{ fontSize: 10 }} />
+        <YAxis unit=" kWh" tick={{ fontSize: 10 }} />
+        <Tooltip formatter={(v: number) => [`${v} kWh/day`, ""]} />
+        <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+          {data.map((d, i) => (
+            <Cell key={i} fill={d.fill} />
+          ))}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  )
+}
+
+export function OpportunityMatrix({
+  sizing,
+  resilienceScore,
+}: {
+  sizing: SizingSummary | null
+  resilienceScore: number | null
+}) {
+  if (!sizing || sizing.annualSavings <= 0 || resilienceScore == null) {
+    return <ChartFallback message="Complete assessment + climate readiness to see the opportunity matrix." />
+  }
+
+  const savings = Math.max(0, sizing.annualSavings)
+  const resilienceImpact = Math.max(0, Math.min(100, resilienceScore))
+
+  const data = [{ x: savings, y: resilienceImpact, z: 1, label: "This facility" }]
+
+  return (
+    <ResponsiveContainer width="100%" height={240}>
+      <ScatterChart margin={{ top: 8, right: 16, left: 8, bottom: 28 }}>
+        <CartesianGrid strokeDasharray="3 3" className="stroke-emerald-100" />
+        <XAxis
+          type="number"
+          dataKey="x"
+          name="Savings"
+          tick={{ fontSize: 10 }}
+          tickFormatter={(v) => formatCurrency(v)}
+          label={{ value: "Cost savings potential (TZS/yr)", position: "insideBottom", offset: -10, fontSize: 10 }}
+        />
+        <YAxis
+          type="number"
+          dataKey="y"
+          name="Resilience"
+          tick={{ fontSize: 10 }}
+          domain={[0, 100]}
+          label={{ value: "Resilience score (0–100)", angle: -90, position: "insideLeft", fontSize: 10 }}
+        />
+        <Tooltip
+          cursor={{ strokeDasharray: "3 3" }}
+          formatter={(v: number, name: string) => {
+            if (name === "Savings") return [formatCurrency(v), name]
+            return [v, name]
+          }}
+        />
+        <Scatter name="Facility" data={data} fill={EMERALD} />
+      </ScatterChart>
+    </ResponsiveContainer>
+  )
+}
+
+export function ActionPriorityChart({
+  recommendations,
+}: {
+  recommendations: IntelligenceRecommendation[]
+}) {
+  if (!recommendations || recommendations.length === 0) {
+    return <ChartFallback message="Complete assessment inputs to generate and visualize prioritized actions." />
+  }
+
+  const priorityWeight: Record<string, number> = { high: 3, medium: 2, low: 1 }
+  const horizonWeight: Record<string, number> = { immediate: 3, medium: 2, capital: 1 }
+
+  const data = recommendations.slice(0, 12).map((r, idx) => {
+    const score = (priorityWeight[r.priority] || 1) * 10 + (horizonWeight[r.horizon] || 1) * 3
+    return {
+      name: r.title.length > 18 ? `${r.title.slice(0, 16)}…` : r.title,
+      score,
+      priority: r.priority,
+      horizon: r.horizon,
+      fill: r.priority === "high" ? "#dc2626" : r.priority === "medium" ? "#f59e0b" : EMERALD,
+    }
+  })
+
+  return (
+    <ResponsiveContainer width="100%" height={240}>
+      <BarChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 36 }}>
+        <CartesianGrid strokeDasharray="3 3" className="stroke-emerald-100" />
+        <XAxis dataKey="name" interval={0} angle={-14} textAnchor="end" height={64} tick={{ fontSize: 10 }} />
+        <YAxis tick={{ fontSize: 10 }} />
+        <Tooltip
+          formatter={(v: number, name: string, ctx: any) => {
+            const payload = ctx?.payload
+            const extra =
+              payload?.priority && payload?.horizon ? ` (${payload.priority}, ${payload.horizon})` : ""
+            return [`${v}${extra}`, "Priority score"]
+          }}
+        />
+        <Bar dataKey="score" radius={[4, 4, 0, 0]}>
+          {data.map((d, i) => (
+            <Cell key={i} fill={d.fill} />
+          ))}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  )
+}
+
+export function ImprovementTimelineChart({
+  points,
+}: {
+  points: { date: string; value: number }[]
+}) {
+  if (!points || points.length < 2) {
+    return <ChartFallback message="Complete and save assessments over time to see trend." />
+  }
+
+  const data = points.map((p) => ({ date: p.date.slice(5), value: p.value }))
+
+  return (
+    <ResponsiveContainer width="100%" height={220}>
+      <LineChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+        <CartesianGrid strokeDasharray="3 3" className="stroke-emerald-100" />
+        <XAxis dataKey="date" tick={{ fontSize: 10 }} />
+        <YAxis tick={{ fontSize: 10 }} domain={[0, 100]} />
+        <Tooltip />
+        <Legend wrapperStyle={{ fontSize: 11 }} />
+        <Line type="monotone" dataKey="value" name="Score" stroke={EMERALD} strokeWidth={2} dot={false} />
+      </LineChart>
+    </ResponsiveContainer>
+  )
+}
+
 export function IntelligenceChartGrid({
   meu,
   sizing,
   facilityExtras,
+  resilienceScore,
+  recommendations,
+  bmiTrend,
 }: {
   meu: MeuSummary | null
   sizing: SizingSummary | null
@@ -217,6 +425,9 @@ export function IntelligenceChartGrid({
     dieselLitresPerDay: number
     dieselPricePerLitre: number
   }
+  resilienceScore?: number | null
+  recommendations?: IntelligenceRecommendation[]
+  bmiTrend?: { date: string; value: number }[]
 }) {
   const annualGrid = sizing?.annualGridCost ?? 0
   const annualDiesel = sizing?.annualDieselCost ?? 0
@@ -286,6 +497,56 @@ export function IntelligenceChartGrid({
         </CardHeader>
         <CardContent>
           <SavingsWaterfallSimplified currentAnnual={currentAnnualForWaterfall} savingsAnnual={savingsAnnual} />
+        </CardContent>
+      </Card>
+
+      <Card className="border-emerald-100">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm">Outage exposure timeline</CardTitle>
+          <CardDescription className="text-xs">Outage hours vs backup covered vs unprotected</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <OutageExposureTimeline outageHoursPerDay={averageOutageHours} backupHoursAvailable={4} />
+        </CardContent>
+      </Card>
+
+      <Card className="border-emerald-100">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm">Solar coverage simulation</CardTitle>
+          <CardDescription className="text-xs">Illustrative: demand vs solar + battery contribution</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <SolarCoverageSimulationChart sizing={sizing} />
+        </CardContent>
+      </Card>
+
+      <Card className="border-emerald-100 lg:col-span-2">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm">Energy–resilience opportunity matrix</CardTitle>
+          <CardDescription className="text-xs">Cost savings potential vs resilience score</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <OpportunityMatrix sizing={sizing} resilienceScore={resilienceScore ?? null} />
+        </CardContent>
+      </Card>
+
+      <Card className="border-emerald-100 lg:col-span-2">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm">Action priority chart</CardTitle>
+          <CardDescription className="text-xs">Ranked actions by risk + impact + feasibility (proxy)</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ActionPriorityChart recommendations={recommendations ?? []} />
+        </CardContent>
+      </Card>
+
+      <Card className="border-emerald-100 lg:col-span-2">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm">Efficiency score trend</CardTitle>
+          <CardDescription className="text-xs">Before/after over reassessments (local history)</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ImprovementTimelineChart points={bmiTrend ?? []} />
         </CardContent>
       </Card>
     </div>

@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/config'
+import { db } from '@/lib/db'
+import { carbonCredits } from '@/lib/db/schema'
+import { eq } from 'drizzle-orm'
 
 /**
  * PUT /api/admin/carbon-credits/[id]
@@ -21,21 +24,39 @@ export async function PUT(
     const body = await request.json()
     const { verificationStatus, verifiedBy, notes, certificateId } = body
 
-    const updatedCredit = {
-      id,
-      verificationStatus,
-      verifiedAt: verificationStatus !== 'pending' ? new Date().toISOString() : undefined,
-      verifiedBy: verificationStatus !== 'pending' ? verifiedBy : undefined,
-      notes,
-      certificateId: verificationStatus === 'certified' ? certificateId : undefined,
-      updatedAt: new Date().toISOString(),
-    }
+    const verifiedAt = verificationStatus !== 'pending' ? new Date() : null
+    const verifiedByValue = verificationStatus !== 'pending' ? (verifiedBy ?? null) : null
+    const cert = verificationStatus === 'certified' ? (certificateId ?? null) : null
 
-    console.log('Updating carbon credit:', updatedCredit)
+    const result = await db
+      .update(carbonCredits)
+      .set({
+        verificationStatus,
+        verifiedAt,
+        verifiedBy: verifiedByValue,
+        notes: notes ?? null,
+        certificateId: cert,
+        updatedAt: new Date(),
+      })
+      .where(eq(carbonCredits.id, id))
+
+    // drizzle update returns a result object; we just confirm success by re-reading
+    const [updated] = await db.select().from(carbonCredits).where(eq(carbonCredits.id, id)).limit(1)
+    if (!updated) {
+      return NextResponse.json({ error: 'Carbon credit not found' }, { status: 404 })
+    }
 
     return NextResponse.json({
       success: true,
-      data: updatedCredit,
+      data: {
+        id: updated.id,
+        verificationStatus: updated.verificationStatus,
+        verifiedAt: updated.verifiedAt ? new Date(updated.verifiedAt).toISOString() : undefined,
+        verifiedBy: updated.verifiedBy ?? undefined,
+        notes: updated.notes ?? undefined,
+        certificateId: updated.certificateId ?? undefined,
+        updatedAt: new Date(updated.updatedAt).toISOString(),
+      },
       message: 'Carbon credit updated successfully',
     })
   } catch (error) {
@@ -64,7 +85,7 @@ export async function DELETE(
 
     const { id } = await params
 
-    console.log('Deleting carbon credit:', id)
+    await db.delete(carbonCredits).where(eq(carbonCredits.id, id))
 
     return NextResponse.json({
       success: true,

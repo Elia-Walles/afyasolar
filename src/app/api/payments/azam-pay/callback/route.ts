@@ -14,6 +14,15 @@ import { sendPaymentVerificationSMS } from '@/lib/sms'
 export const dynamic = "force-dynamic"
 export const revalidate = 0
 
+function maskSensitive(value: string, opts?: { keepStart?: number; keepEnd?: number }) {
+  const keepStart = opts?.keepStart ?? 3
+  const keepEnd = opts?.keepEnd ?? 2
+  if (!value) return value
+  const v = String(value)
+  if (v.length <= keepStart + keepEnd) return '*'.repeat(v.length)
+  return `${v.slice(0, keepStart)}${'*'.repeat(v.length - keepStart - keepEnd)}${v.slice(-keepEnd)}`
+}
+
 /**
  * Azam Pay Callback Request Structure (from official docs)
  * 
@@ -72,7 +81,8 @@ export async function POST(request: NextRequest) {
   
   try {
     const rawBody = await request.text()
-    console.log(`[${requestId}] Raw request body:`, rawBody)
+    // Avoid logging raw webhook payload; it can contain PII (e.g., msisdn).
+    console.log(`[${requestId}] Raw callback received (bytes):`, rawBody.length)
     
     let body: AzamPayCallback
     try {
@@ -88,8 +98,13 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Log the full callback for debugging
-    console.log(`[${requestId}] Parsed callback body:`, JSON.stringify(body, null, 2))
+    // Log a redacted callback summary for debugging without PII leakage.
+    const redacted = {
+      ...body,
+      msisdn: body.msisdn ? maskSensitive(body.msisdn) : undefined,
+      bankAccountNumber: (body as any).bankAccountNumber ? maskSensitive(String((body as any).bankAccountNumber)) : undefined,
+    }
+    console.log(`[${requestId}] Parsed callback body (redacted):`, JSON.stringify(redacted, null, 2))
     console.log(`[${requestId}] Callback body keys:`, Object.keys(body))
     console.log('═══════════════════════════════════════════════════')
 

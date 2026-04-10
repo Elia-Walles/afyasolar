@@ -4,6 +4,7 @@ import { authOptions } from '@/lib/auth/config'
 import { db } from '@/lib/db'
 import { bills } from '@/lib/db/schema'
 import { eq, desc } from 'drizzle-orm'
+import { randomUUID } from 'crypto'
 
 /**
  * GET /api/bills
@@ -57,12 +58,18 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { facilityId, periodStart, periodEnd, totalConsumption, totalCost, dueDate } = body
 
-    if (!facilityId || !periodStart || !periodEnd || !totalConsumption || !totalCost || !dueDate) {
+    if (!facilityId || !periodStart || !periodEnd || totalConsumption == null || totalCost == null || !dueDate) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
     }
 
+    const consumption = Number(totalConsumption)
+    const cost = Number(totalCost)
+    if (!Number.isFinite(consumption) || consumption <= 0 || !Number.isFinite(cost) || cost < 0) {
+      return NextResponse.json({ error: 'Invalid totalConsumption or totalCost' }, { status: 400 })
+    }
+
     // Generate ID first (MySQL doesn't support RETURNING clause)
-    const billId = crypto.randomUUID()
+    const billId = randomUUID()
     
     await db
       .insert(bills)
@@ -71,8 +78,8 @@ export async function POST(request: NextRequest) {
         facilityId,
         periodStart: new Date(periodStart),
         periodEnd: new Date(periodEnd),
-        totalConsumption: totalConsumption.toString(),
-        totalCost: totalCost.toString(),
+        totalConsumption: consumption.toString(),
+        totalCost: cost.toString(),
         dueDate: new Date(dueDate),
         status: 'pending',
       })

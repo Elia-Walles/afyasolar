@@ -14,6 +14,7 @@ import {
   DollarSign, 
   Calendar, 
   Clock, 
+  History,
   Download, 
   Search, 
   SortAsc, 

@@ -257,7 +257,7 @@ export function PaymentHistoryReceipts({ facilityId }: PaymentHistoryReceiptsPro
   }
 
   const printReceipt = (receipt: Receipt) => {
-    const printWindow = window.open('', '', 'PRINT', 'height=600,width=800')
+    const printWindow = window.open('', 'PRINT', 'height=600,width=800')
     if (printWindow) {
       printWindow.document.write(`
         <html>

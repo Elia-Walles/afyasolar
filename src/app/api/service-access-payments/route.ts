@@ -43,13 +43,6 @@ export async function GET(request: NextRequest) {
       .where(and(...conditions))
       .orderBy(desc(serviceAccessPayments.createdAt))
 
-    console.log('[AfyaSolarPayment][LIST]', {
-      facilityId,
-      serviceName,
-      count: payments.length,
-      ids: payments.map((p) => p.id),
-    })
-
     return NextResponse.json({
       success: true,
       data: payments

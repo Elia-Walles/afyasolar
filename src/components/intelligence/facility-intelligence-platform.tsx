@@ -6,6 +6,8 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import {
   AfyaSolarSizingTool,
   type SizingSummary,
@@ -15,7 +17,9 @@ import {
 } from "@/components/solar/afya-solar-sizing-tool"
 import { FourPointAssessment } from "@/components/solar/four-point-assessment"
 import { IntelligenceChartGrid } from "@/components/intelligence/energy-charts"
+import { FacilityMeterEfficiencyDashboard } from "@/components/efficiency/facility-meter-efficiency-dashboard"
 import { FacilityClimateResilienceDashboard } from "@/components/efficiency/facility-climate-resilience-dashboard"
+import { ClimateResilienceAssessment } from "@/components/climate/climate-resilience-assessment"
 import { buildIntelligenceRecommendations, type SectionScores } from "@/lib/intelligence/recommendations"
 import { formatCurrency } from "@/lib/utils"
 import {
@@ -31,6 +35,8 @@ type IntelTab = "overview" | "assess" | "analyze" | "action" | "reports"
 
 const tabTriggerClass =
   "text-xs sm:text-sm rounded-md data-[state=active]:bg-white data-[state=active]:text-emerald-800 data-[state=active]:shadow-sm"
+
+type StepStatus = "complete" | "in_progress" | "blocked"
 
 interface FacilityIntelligencePlatformProps {
   facilityId?: string
@@ -63,22 +69,74 @@ export function FacilityIntelligencePlatform({
   const [assessSub, setAssessSub] = useState<"devices" | "operations" | "climate">("devices")
   const [facilityCtx, setFacilityCtx] = useState<FacilityContextSnapshot | null>(null)
   const [climateResilienceScore, setClimateResilienceScore] = useState<number | null>(null)
+  const [assessmentCycleId, setAssessmentCycleId] = useState<string | null>(null)
+  const [actionMeta, setActionMeta] = useState<Record<string, { owner?: string; dueDate?: string }>>({})
+  const [bmiTrend, setBmiTrend] = useState<{ date: string; value: number }[]>([])
+  const [actionPlanStatus, setActionPlanStatus] = useState<"idle" | "saving" | "saved" | "error">("idle")
+  const [persistedClimateScore, setPersistedClimateScore] = useState<{
+    rcs: number
+    tier: number
+    criticalAttention: boolean
+  } | null>(null)
+  const [persistedTopRisks, setPersistedTopRisks] = useState<
+    { id: string; title: string; severity: number; riskType: string; rank: number }[]
+  >([])
+  const [persistedTasks, setPersistedTasks] = useState<
+    { id: string; recommendationId: string; ownerName: string | null; dueDate: string | null; status: string }[]
+  >([])
 
   useEffect(() => {
     let cancelled = false
     if (!facilityId) {
       setClimateResilienceScore(null)
+      setAssessmentCycleId(null)
+      setPersistedClimateScore(null)
+      setPersistedTopRisks([])
+      setPersistedTasks([])
       return
     }
     ;(async () => {
       try {
-        const res = await fetch(`/api/facility/${facilityId}/climate-resilience`)
+        // Ensure there is an active assessment cycle (draft).
+        const cyclesRes = await fetch(`/api/facility/${facilityId}/assessment-cycles`, { cache: "no-store" })
+        const cyclesJson = await cyclesRes.json()
+        const cycles = Array.isArray(cyclesJson?.cycles) ? cyclesJson.cycles : []
+        const draft = cycles.find((c: any) => c?.status === "draft") ?? cycles[0]
+
+        let cycleId: string | null = draft?.id ?? null
+        if (!cycleId) {
+          const createRes = await fetch(`/api/facility/${facilityId}/assessment-cycles`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ version: "2.0" }),
+          })
+          const createJson = await createRes.json()
+          cycleId = createJson?.cycle?.id ?? null
+        }
+
+        if (!cancelled) setAssessmentCycleId(cycleId)
+
+        // Load persisted climate score if present.
+        if (cycleId) {
+          const climateRes = await fetch(`/api/assessment-cycles/${cycleId}/climate`, { cache: "no-store" })
+          const climateJson = await climateRes.json()
+          const score = climateJson?.score?.rcs
+          if (!cancelled && score !== undefined && score !== null) {
+            setPersistedClimateScore({
+              rcs: Number(climateJson.score.rcs),
+              tier: Number(climateJson.score.tier ?? 0),
+              criticalAttention: Boolean(climateJson.score.criticalAttention),
+            })
+            setPersistedTopRisks(Array.isArray(climateJson?.topRisks) ? climateJson.topRisks : [])
+            setClimateResilienceScore(Number(score))
+            return
+          }
+        }
+
+        // Fallback to existing seeded endpoint (legacy dashboards).
+        const res = await fetch(`/api/facility/${facilityId}/climate-resilience`, { cache: "no-store" })
         const json = await res.json()
-        if (
-          !cancelled &&
-          json?.data?.profile?.overallResilienceScore !== undefined &&
-          json?.data?.profile?.overallResilienceScore !== null
-        ) {
+        if (!cancelled && json?.data?.profile?.overallResilienceScore !== undefined && json?.data?.profile?.overallResilienceScore !== null) {
           setClimateResilienceScore(Number(json.data.profile.overallResilienceScore))
         }
       } catch {
@@ -90,10 +148,55 @@ export function FacilityIntelligencePlatform({
     }
   }, [facilityId])
 
+  useEffect(() => {
+    let cancelled = false
+    if (!assessmentCycleId) {
+      setPersistedTasks([])
+      return
+    }
+
+    ;(async () => {
+      try {
+        const res = await fetch(`/api/assessment-cycles/${assessmentCycleId}/action-plan`, { cache: "no-store" })
+        const json = await res.json()
+        if (cancelled) return
+        if (!res.ok) return
+        const tasks = Array.isArray(json?.tasks) ? json.tasks : []
+        setPersistedTasks(tasks)
+      } catch {
+        if (!cancelled) setPersistedTasks([])
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [assessmentCycleId])
+
   const recommendations = useMemo(
     () => buildIntelligenceRecommendations(sizingSummary, meuSummary, bmiSummary, sectionScores),
     [sizingSummary, meuSummary, bmiSummary, sectionScores]
   )
+
+  const completion = useMemo(() => {
+    const devicesDone = Boolean(meuSummary && meuSummary.totalDailyLoad > 0)
+    const operationsDone = Boolean(bmiSummary != null && bmiSummary.score !== null)
+    const climateDone = climateResilienceScore !== null
+    const assessDone = devicesDone && operationsDone && climateDone
+    const analyzeReady = devicesDone || operationsDone || climateDone
+    const actionReady = analyzeReady
+    const reportsReady = analyzeReady
+
+    return {
+      devicesDone,
+      operationsDone,
+      climateDone,
+      assessDone,
+      analyzeReady,
+      actionReady,
+      reportsReady,
+    }
+  }, [meuSummary, bmiSummary, climateResilienceScore])
 
   const assessProgress = useMemo(() => {
     let done = 0
@@ -105,6 +208,109 @@ export function FacilityIntelligencePlatform({
   }, [meuSummary, bmiSummary, climateResilienceScore])
 
   const efficiencyScore = bmiSummary?.bmiPercent ?? null
+
+  useEffect(() => {
+    if (!facilityId || efficiencyScore == null) return
+    const key = `afyasolar:bmiTrend:${facilityId}`
+    try {
+      const prevRaw = localStorage.getItem(key)
+      const prev: { date: string; value: number }[] = prevRaw ? JSON.parse(prevRaw) : []
+      const today = new Date().toISOString().slice(0, 10)
+      const next = [...prev]
+      // Replace existing point for today, else append
+      const existingIdx = next.findIndex((p) => p.date === today)
+      if (existingIdx >= 0) next[existingIdx] = { date: today, value: Number(efficiencyScore) }
+      else next.push({ date: today, value: Number(efficiencyScore) })
+      const trimmed = next.slice(-12)
+      localStorage.setItem(key, JSON.stringify(trimmed))
+      setBmiTrend(trimmed)
+    } catch {
+      // ignore
+    }
+  }, [facilityId, efficiencyScore])
+
+  useEffect(() => {
+    if (!facilityId) return
+    const key = `afyasolar:bmiTrend:${facilityId}`
+    try {
+      const prevRaw = localStorage.getItem(key)
+      const prev: { date: string; value: number }[] = prevRaw ? JSON.parse(prevRaw) : []
+      if (Array.isArray(prev)) setBmiTrend(prev.slice(-12))
+    } catch {
+      // ignore
+    }
+  }, [facilityId])
+
+  const nextRecommendedStep = useMemo((): IntelTab => {
+    if (!completion.devicesDone || !completion.operationsDone || !completion.climateDone) return "assess"
+    if (completion.analyzeReady) return "analyze"
+    return "overview"
+  }, [completion])
+
+  const stepStatus = useMemo(() => {
+    const map: Record<IntelTab, StepStatus> = {
+      overview: "in_progress",
+      assess: completion.assessDone ? "complete" : "in_progress",
+      analyze: completion.analyzeReady ? "in_progress" : "blocked",
+      action: completion.actionReady ? "in_progress" : "blocked",
+      reports: completion.reportsReady ? "in_progress" : "blocked",
+    }
+    return map
+  }, [completion])
+
+  const onNavigate = (tab: IntelTab) => {
+    // Guided workflow gating
+    if (tab === "analyze" || tab === "action" || tab === "reports") {
+      if (!completion.analyzeReady) {
+        setMainTab("assess")
+        setAssessSub("devices")
+        return
+      }
+    }
+    setMainTab(tab)
+  }
+
+  const StepPill = ({
+    id,
+    label,
+    status,
+  }: {
+    id: IntelTab
+    label: string
+    status: StepStatus
+  }) => {
+    const active = mainTab === id
+    const base =
+      "w-full sm:w-auto flex items-center justify-between sm:justify-start gap-2 rounded-xl border px-3 py-2 text-xs sm:text-sm transition-colors"
+    const styles = active
+      ? "border-emerald-300 bg-white shadow-sm text-emerald-950"
+      : status === "blocked"
+        ? "border-slate-200 bg-slate-50 text-slate-400 cursor-not-allowed"
+        : "border-emerald-100 bg-emerald-50/40 text-emerald-900 hover:bg-emerald-50"
+    return (
+      <button
+        type="button"
+        onClick={() => status !== "blocked" && onNavigate(id)}
+        className={`${base} ${styles}`}
+        aria-current={active ? "step" : undefined}
+      >
+        <span className="font-medium">{label}</span>
+        {status === "complete" ? (
+          <Badge variant="secondary" className="bg-emerald-100 text-emerald-900 text-[10px]">
+            Done
+          </Badge>
+        ) : status === "blocked" ? (
+          <Badge variant="outline" className="text-[10px] border-slate-200">
+            Locked
+          </Badge>
+        ) : (
+          <Badge variant="outline" className="text-[10px] border-emerald-200 text-emerald-800">
+            In progress
+          </Badge>
+        )}
+      </button>
+    )
+  }
 
   return (
     <div className="space-y-4">
@@ -129,28 +335,48 @@ export function FacilityIntelligencePlatform({
       </div>
 
       <Tabs value={mainTab} onValueChange={(v) => setMainTab(v as IntelTab)} className="space-y-4">
-        <TabsList className="grid w-full grid-cols-2 sm:grid-cols-5 h-auto gap-1 rounded-xl bg-emerald-50/80 p-1 border border-emerald-100">
-          <TabsTrigger value="overview" className={tabTriggerClass}>
-            <LayoutDashboard className="h-3.5 w-3.5 mr-1 hidden sm:inline" />
-            Overview
-          </TabsTrigger>
-          <TabsTrigger value="assess" className={tabTriggerClass}>
-            <ClipboardList className="h-3.5 w-3.5 mr-1 hidden sm:inline" />
-            Assess
-          </TabsTrigger>
-          <TabsTrigger value="analyze" className={tabTriggerClass}>
-            <LineChart className="h-3.5 w-3.5 mr-1 hidden sm:inline" />
-            Analyze
-          </TabsTrigger>
-          <TabsTrigger value="action" className={tabTriggerClass}>
-            <ListChecks className="h-3.5 w-3.5 mr-1 hidden sm:inline" />
-            Action plan
-          </TabsTrigger>
-          <TabsTrigger value="reports" className={`${tabTriggerClass} col-span-2 sm:col-span-1`}>
-            <Activity className="h-3.5 w-3.5 mr-1 hidden sm:inline" />
-            Reports
-          </TabsTrigger>
-        </TabsList>
+        {/* Guided workflow stepper (v2.0 IA) */}
+        <div className="space-y-2">
+          <div className="grid gap-2 sm:grid-cols-5">
+            <StepPill id="overview" label="Overview" status="in_progress" />
+            <StepPill id="assess" label="Assess" status={stepStatus.assess} />
+            <StepPill id="analyze" label="Analyze" status={stepStatus.analyze} />
+            <StepPill id="action" label="Action plan" status={stepStatus.action} />
+            <StepPill id="reports" label="Reports & portfolio" status={stepStatus.reports} />
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-100 bg-emerald-50/40 px-3 py-2">
+            <div className="min-w-0">
+              <p className="text-xs text-emerald-900/80">
+                Next recommended:{" "}
+                <span className="font-semibold text-emerald-950">
+                  {nextRecommendedStep === "assess"
+                    ? "Assess"
+                    : nextRecommendedStep === "analyze"
+                      ? "Analyze"
+                      : "Overview"}
+                </span>
+                {nextRecommendedStep === "assess" && (
+                  <span className="text-emerald-900/70">
+                    {" "}
+                    — complete Devices & loads, Operational efficiency, and Climate readiness.
+                  </span>
+                )}
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                className="bg-emerald-600 hover:bg-emerald-700"
+                onClick={() => onNavigate(nextRecommendedStep)}
+              >
+                Continue
+              </Button>
+              <Button size="sm" variant="outline" className="border-emerald-200" onClick={() => onNavigate("reports")}>
+                View report
+              </Button>
+            </div>
+          </div>
+        </div>
 
         <TabsContent value="overview" className="space-y-4 mt-4">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -256,10 +482,10 @@ export function FacilityIntelligencePlatform({
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={() => setMainTab("assess")}>
+            <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={() => onNavigate("assess")}>
               Continue assessment
             </Button>
-            <Button size="sm" variant="outline" className="border-emerald-200" onClick={() => setMainTab("analyze")}>
+            <Button size="sm" variant="outline" className="border-emerald-200" onClick={() => onNavigate("analyze")}>
               View charts
             </Button>
           </div>
@@ -298,19 +524,126 @@ export function FacilityIntelligencePlatform({
               <FourPointAssessment onScoreChange={onBmiSummaryChange} onSectionScoresChange={onSectionScoresChange} />
             </TabsContent>
             <TabsContent value="climate" className="mt-4">
-              <FacilityClimateResilienceDashboard facilityId={facilityId} />
+              {facilityId ? (
+                <div className="space-y-4">
+                  <ClimateResilienceAssessment
+                    facilityId={facilityId}
+                    assessmentCycleId={assessmentCycleId ?? undefined}
+                    onCapacityScoreChange={(score) => setClimateResilienceScore(score)}
+                  />
+                  <Card className="border-emerald-100">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm">Existing climate dashboard (seeded)</CardTitle>
+                      <CardDescription className="text-xs">
+                        Hazard radar + adaptation tracker based on seeded profile. The guided assessment above will
+                        become the primary input source as we connect persistence.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <FacilityClimateResilienceDashboard facilityId={facilityId} />
+                    </CardContent>
+                  </Card>
+                </div>
+              ) : (
+                <FacilityClimateResilienceDashboard facilityId={facilityId} />
+              )}
             </TabsContent>
           </Tabs>
         </TabsContent>
 
         <TabsContent value="analyze" className="mt-4">
-          <IntelligenceChartGrid meu={meuSummary} sizing={sizingSummary} facilityExtras={facilityCtx ?? undefined} />
+          <div className="space-y-4">
+            <IntelligenceChartGrid
+              meu={meuSummary}
+              sizing={sizingSummary}
+              facilityExtras={facilityCtx ?? undefined}
+              resilienceScore={climateResilienceScore}
+              recommendations={recommendations}
+              bmiTrend={bmiTrend}
+            />
+            <FacilityMeterEfficiencyDashboard facilityId={facilityId} preferMock={false} />
+            <Card className="border-emerald-100">
+              <CardHeader>
+                <CardTitle className="text-sm">Climate resilience &amp; adaptation</CardTitle>
+                <CardDescription className="text-xs">
+                  Hazard exposure, resilience trend, and adaptation plan tracking — integrated in the same workflow.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <FacilityClimateResilienceDashboard facilityId={facilityId} />
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
 
         <TabsContent value="action" className="mt-4 space-y-3">
           <p className="text-sm text-muted-foreground">
-            Ranked recommendations with explainability. Assign owners and dates in a future task workflow.
+            Ranked recommendations with explainability. Owners and due dates are saved to your assessment cycle.
           </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              className="bg-emerald-600 hover:bg-emerald-700"
+              disabled={!assessmentCycleId || actionPlanStatus === "saving"}
+              onClick={async () => {
+                if (!assessmentCycleId) return
+                setActionPlanStatus("saving")
+                try {
+                  await fetch(`/api/assessment-cycles/${assessmentCycleId}/action-plan`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      recommendations: recommendations.map((r) => ({
+                        id: r.id,
+                        moduleSource: r.moduleSource,
+                        title: r.title,
+                        description: r.action,
+                        priority: r.priority,
+                        horizon: r.horizon,
+                        ownerType: "facility",
+                        evidenceRequired: false,
+                        explanation: `${r.issue} — ${r.whyItMatters}`,
+                      })),
+                    }),
+                  })
+
+                  const tasks = recommendations
+                    .map((r) => ({
+                      recommendationId: r.id,
+                      ownerName: actionMeta[r.id]?.owner,
+                      dueDate: actionMeta[r.id]?.dueDate,
+                      status: actionMeta[r.id]?.owner || actionMeta[r.id]?.dueDate ? "open" : undefined,
+                    }))
+                    .filter((t) => Boolean(t.ownerName || t.dueDate))
+
+                  if (tasks.length > 0) {
+                    await fetch(`/api/assessment-cycles/${assessmentCycleId}/action-plan`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ tasks }),
+                    })
+                  }
+
+                  setActionPlanStatus("saved")
+                  setTimeout(() => setActionPlanStatus("idle"), 1500)
+                } catch {
+                  setActionPlanStatus("error")
+                  setTimeout(() => setActionPlanStatus("idle"), 2500)
+                }
+              }}
+            >
+              {actionPlanStatus === "saving"
+                ? "Saving…"
+                : actionPlanStatus === "saved"
+                  ? "Saved"
+                  : actionPlanStatus === "error"
+                    ? "Error"
+                    : "Save action plan"}
+            </Button>
+            {!assessmentCycleId && (
+              <span className="text-xs text-muted-foreground">Sign in as a facility to save.</span>
+            )}
+          </div>
           {recommendations.map((r) => (
             <Card key={r.id} className="border-emerald-100">
               <CardHeader className="pb-2">
@@ -343,12 +676,92 @@ export function FacilityIntelligencePlatform({
                   <span className="font-medium text-emerald-800">Expected impact: </span>
                   {r.expectedImpact}
                 </p>
+                <div className="grid gap-3 pt-2 border-t border-emerald-50 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Owner</Label>
+                    <Input
+                      value={actionMeta[r.id]?.owner ?? ""}
+                      placeholder="e.g. Facility manager"
+                      onChange={(e) =>
+                        setActionMeta((prev) => ({
+                          ...prev,
+                          [r.id]: { ...prev[r.id], owner: e.target.value },
+                        }))
+                      }
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Due date</Label>
+                    <Input
+                      type="date"
+                      value={actionMeta[r.id]?.dueDate ?? ""}
+                      onChange={(e) =>
+                        setActionMeta((prev) => ({
+                          ...prev,
+                          [r.id]: { ...prev[r.id], dueDate: e.target.value },
+                        }))
+                      }
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                </div>
               </CardContent>
             </Card>
           ))}
         </TabsContent>
 
         <TabsContent value="reports" className="mt-4 space-y-4">
+          {/* Executive summary strip (v2.0) */}
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+            <Card className="border-emerald-100 lg:col-span-2">
+              <CardHeader className="pb-2">
+                <CardDescription className="text-xs">Total daily energy</CardDescription>
+                <CardTitle className="text-2xl text-emerald-900">
+                  {sizingSummary ? `${sizingSummary.totalDailyLoad.toFixed(1)} kWh/d` : "—"}
+                </CardTitle>
+              </CardHeader>
+            </Card>
+            <Card className="border-emerald-100">
+              <CardHeader className="pb-2">
+                <CardDescription className="text-xs">Indicative solar</CardDescription>
+                <CardTitle className="text-2xl text-emerald-900">
+                  {sizingSummary ? `${sizingSummary.solarArraySize.toFixed(1)} kW` : "—"}
+                </CardTitle>
+              </CardHeader>
+            </Card>
+            <Card className="border-emerald-100">
+              <CardHeader className="pb-2">
+                <CardDescription className="text-xs">Annual savings</CardDescription>
+                <CardTitle className="text-2xl text-emerald-900">
+                  {sizingSummary ? formatCurrency(sizingSummary.annualSavings) : "—"}
+                </CardTitle>
+              </CardHeader>
+            </Card>
+            <Card className="border-emerald-100">
+              <CardHeader className="pb-2">
+                <CardDescription className="text-xs">Resilience status</CardDescription>
+                <CardTitle className="text-2xl text-emerald-900">
+                  {persistedClimateScore?.rcs ?? (climateResilienceScore !== null ? climateResilienceScore : "—")}
+                </CardTitle>
+                {persistedClimateScore && (
+                  <p className="text-[11px] text-muted-foreground">
+                    Tier {persistedClimateScore.tier}
+                    {persistedClimateScore.criticalAttention ? " · Critical attention" : ""}
+                  </p>
+                )}
+              </CardHeader>
+            </Card>
+            <Card className="border-emerald-100">
+              <CardHeader className="pb-2">
+                <CardDescription className="text-xs">Efficiency score (BMI)</CardDescription>
+                <CardTitle className="text-2xl text-emerald-900">
+                  {efficiencyScore !== null ? `${efficiencyScore}%` : "—"}
+                </CardTitle>
+              </CardHeader>
+            </Card>
+          </div>
+
           <Card className="border-emerald-100">
             <CardHeader>
               <CardTitle className="text-base">Executive summary</CardTitle>
@@ -385,7 +798,90 @@ export function FacilityIntelligencePlatform({
               )}
             </CardContent>
           </Card>
-          <IntelligenceChartGrid meu={meuSummary} sizing={sizingSummary} facilityExtras={facilityCtx ?? undefined} />
+
+          {(persistedTopRisks.length > 0 || persistedTasks.length > 0) && (
+            <div className="grid gap-4 lg:grid-cols-2">
+              <Card className="border-emerald-100">
+                <CardHeader>
+                  <CardTitle className="text-base">Top climate risk drivers (saved)</CardTitle>
+                  <CardDescription className="text-xs">From your persisted climate assessment scoring.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {persistedTopRisks.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No saved climate risk drivers yet.</p>
+                  ) : (
+                    persistedTopRisks.slice(0, 5).map((r) => (
+                      <div key={r.id} className="flex items-center justify-between gap-3 rounded-lg border border-emerald-50 bg-white px-3 py-2 text-sm">
+                        <div className="min-w-0">
+                          <p className="font-medium text-emerald-950 truncate">
+                            {r.rank ? `${r.rank}. ` : ""}{r.title}
+                          </p>
+                          <p className="text-[11px] text-muted-foreground truncate">{r.riskType}</p>
+                        </div>
+                        <Badge variant="outline" className="border-amber-200 text-amber-900">
+                          {Number(r.severity ?? 0)}%
+                        </Badge>
+                      </div>
+                    ))
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card className="border-emerald-100">
+                <CardHeader>
+                  <CardTitle className="text-base">Assigned tasks (saved)</CardTitle>
+                  <CardDescription className="text-xs">Owners and due dates saved from your Action plan.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {persistedTasks.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No saved tasks yet. Assign owners in Action plan and save.</p>
+                  ) : (
+                    persistedTasks.slice(0, 8).map((t) => (
+                      <div key={t.id} className="rounded-lg border border-emerald-50 bg-white px-3 py-2 text-sm">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="font-medium text-emerald-950">
+                            {t.ownerName ? t.ownerName : "Unassigned"}
+                          </span>
+                          <Badge variant="outline" className="border-slate-200 text-slate-700 text-[10px]">
+                            {t.status}
+                          </Badge>
+                        </div>
+                        <p className="text-[11px] text-muted-foreground mt-1">
+                          Due: {t.dueDate ? new Date(t.dueDate).toLocaleDateString() : "—"} · Rec: {t.recommendationId}
+                        </p>
+                      </div>
+                    ))
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          <IntelligenceChartGrid
+            meu={meuSummary}
+            sizing={sizingSummary}
+            facilityExtras={facilityCtx ?? undefined}
+            resilienceScore={persistedClimateScore?.rcs ?? climateResilienceScore}
+            recommendations={recommendations}
+            bmiTrend={bmiTrend}
+          />
+          <Card className="border-emerald-100">
+            <CardHeader>
+              <CardTitle className="text-base">What to do next</CardTitle>
+              <CardDescription className="text-xs">Turn insights into assigned, trackable actions.</CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-wrap gap-2">
+              <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={() => onNavigate("action")}>
+                Assign owners &amp; due dates
+              </Button>
+              <Button size="sm" variant="outline" className="border-emerald-200" onClick={() => onNavigate("assess")}>
+                Update assessment inputs
+              </Button>
+              <Button size="sm" variant="outline" className="border-emerald-200" onClick={() => window.print()}>
+                Export / Print
+              </Button>
+            </CardContent>
+          </Card>
           <p className="text-[11px] text-muted-foreground">
             For a full engineering PDF including financing, run <span className="font-semibold">Run Design &amp; Finance Engine</span>{" "}
             under Devices &amp; loads, then download PDF from the cost summary.

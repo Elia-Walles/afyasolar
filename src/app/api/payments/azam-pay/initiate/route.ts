@@ -18,6 +18,15 @@ import { afyaSolarPackages, afyaSolarPlans, afyaSolarPlanPricing } from '@/lib/d
 export const dynamic = "force-dynamic"
 export const revalidate = 0
 
+function maskSensitive(value: string, opts?: { keepStart?: number; keepEnd?: number }) {
+  const keepStart = opts?.keepStart ?? 3
+  const keepEnd = opts?.keepEnd ?? 2
+  if (!value) return value
+  const v = String(value)
+  if (v.length <= keepStart + keepEnd) return '*'.repeat(v.length)
+  return `${v.slice(0, keepStart)}${'*'.repeat(v.length - keepStart - keepEnd)}${v.slice(-keepEnd)}`
+}
+
 /**
  * Normalize mobile number to Azam Pay format (255XXXXXXXXX - 12 digits, no + sign)
  * Accepts: +255712345678, 0712345678, 255712345678, 255 712 345 678
@@ -180,7 +189,19 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    console.log('[AfyaSolarPayment][INITIATE] Raw request body:', JSON.stringify(body))
+    // Avoid logging sensitive data (OTP, account numbers, phone numbers).
+    console.log('[AfyaSolarPayment][INITIATE] Request received', {
+      hasMobile: Boolean(body?.mobile),
+      hasBankMobile: Boolean(body?.bankMobile),
+      hasOtp: Boolean(body?.otp),
+      hasAccountNumber: Boolean(body?.accountNumber),
+      provider: body?.provider,
+      paymentType: body?.paymentType,
+      serviceName: body?.serviceName,
+      packageId: body?.packageId,
+      paymentPlan: body?.paymentPlan,
+      amount: body?.amount,
+    })
     const { 
       serviceName, 
       amount: clientAmount, 

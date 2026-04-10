@@ -2281,6 +2281,177 @@ export const transactionStatusHistoryRelations = relations(transactionStatusHist
 }))
 
 /**
+ * Carbon credits (solar generation offsets)
+ */
+export const carbonCredits = mysqlTable('carbon_credits', {
+  id: varchar('id', { length: 36 }).primaryKey(),
+  deviceId: varchar('device_id', { length: 36 }).notNull(),
+  facilityId: varchar('facility_id', { length: 36 }).notNull(),
+  period: varchar('period', { length: 40 }).notNull(), // daily | weekly | monthly | yearly | custom | YYYY-MM, etc.
+  startDate: datetime('start_date', { mode: 'date' }).notNull(),
+  endDate: datetime('end_date', { mode: 'date' }).notNull(),
+  energyGeneratedKwh: decimal('energy_generated_kwh', { precision: 12, scale: 2 }).notNull().default('0.00'),
+  co2SavedKg: decimal('co2_saved_kg', { precision: 12, scale: 2 }).notNull().default('0.00'),
+  creditsEarnedTons: decimal('credits_earned_tons', { precision: 12, scale: 4 }).notNull().default('0.0000'),
+  creditValueUsd: decimal('credit_value_usd', { precision: 10, scale: 2 }).notNull().default('0.00'),
+  totalValueUsd: decimal('total_value_usd', { precision: 12, scale: 2 }).notNull().default('0.00'),
+  verificationStatus: varchar('verification_status', { length: 20 }).notNull().default('pending'), // pending | verified | certified | rejected
+  certificateId: varchar('certificate_id', { length: 80 }),
+  verifiedAt: datetime('verified_at', { mode: 'date' }),
+  verifiedBy: varchar('verified_by', { length: 255 }),
+  notes: text('notes'),
+  metadata: json('metadata'), // { efficiency, operatingHours, baselineEmissions, gridEmissionFactor, calculationMethod, ... }
+  createdAt: datetime('created_at', { mode: 'date' }).notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: datetime('updated_at', { mode: 'date' }).notNull().default(sql`CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`),
+}, (table) => ({
+  facilityIdx: index('cc_facility_idx').on(table.facilityId),
+  deviceIdx: index('cc_device_idx').on(table.deviceId),
+  statusIdx: index('cc_status_idx').on(table.verificationStatus),
+  periodIdx: index('cc_period_idx').on(table.period),
+  startIdx: index('cc_start_idx').on(table.startDate),
+}))
+
+/**
+ * ============================================
+ * FACILITY INTELLIGENCE (Assessment Cycles)
+ * ============================================
+ */
+
+export const assessmentCycles = mysqlTable('assessment_cycles', {
+  id: varchar('id', { length: 36 }).primaryKey(),
+  facilityId: varchar('facility_id', { length: 36 }).notNull(),
+  startedAt: datetime('started_at', { mode: 'date' }).notNull().default(sql`CURRENT_TIMESTAMP`),
+  completedAt: datetime('completed_at', { mode: 'date' }),
+  status: varchar('status', { length: 20 }).notNull().default('draft'), // draft | completed | archived
+  createdBy: varchar('created_by', { length: 120 }), // user id/email
+  version: varchar('version', { length: 20 }).notNull().default('2.0'),
+  createdAt: datetime('created_at', { mode: 'date' }).notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: datetime('updated_at', { mode: 'date' }).notNull().default(sql`CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`),
+}, (table) => ({
+  facilityIdx: index('ac_facility_idx').on(table.facilityId),
+  statusIdx: index('ac_status_idx').on(table.status),
+  startedIdx: index('ac_started_idx').on(table.startedAt),
+}))
+
+export const climateAssessmentResponses = mysqlTable('climate_assessment_responses', {
+  id: varchar('id', { length: 36 }).primaryKey(),
+  assessmentCycleId: varchar('assessment_cycle_id', { length: 36 }).notNull(),
+  moduleCode: varchar('module_code', { length: 10 }).notNull(), // HES | CSF | ECPQ | EDC | RRC
+  questionCode: varchar('question_code', { length: 60 }).notNull(),
+  answerValue: varchar('answer_value', { length: 60 }).notNull(),
+  score: int('score').notNull().default(0),
+  scoreMax: int('score_max').notNull().default(0),
+  note: text('note'),
+  confidence: int('confidence').default(100),
+  createdAt: datetime('created_at', { mode: 'date' }).notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: datetime('updated_at', { mode: 'date' }).notNull().default(sql`CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`),
+}, (table) => ({
+  cycleIdx: index('car_cycle_idx').on(table.assessmentCycleId),
+  moduleIdx: index('car_module_idx').on(table.moduleCode),
+  questionIdx: index('car_question_idx').on(table.questionCode),
+}))
+
+export const climateScoreSummaries = mysqlTable('climate_score_summaries', {
+  id: varchar('id', { length: 36 }).primaryKey(),
+  assessmentCycleId: varchar('assessment_cycle_id', { length: 36 }).notNull().unique(),
+  hes: int('hes').notNull().default(0),
+  csf: int('csf').notNull().default(0),
+  ecpq: int('ecpq').notNull().default(0),
+  edc: int('edc').notNull().default(0),
+  rrc: int('rrc').notNull().default(0),
+  rcs: int('rcs').notNull().default(0), // 0–100 (capacity score)
+  tier: int('tier').notNull().default(0),
+  criticalAttention: boolean('critical_attention').notNull().default(false),
+  createdAt: datetime('created_at', { mode: 'date' }).notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: datetime('updated_at', { mode: 'date' }).notNull().default(sql`CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`),
+}, (table) => ({
+  cycleIdx: index('css_cycle_idx').on(table.assessmentCycleId),
+  rcsIdx: index('css_rcs_idx').on(table.rcs),
+  tierIdx: index('css_tier_idx').on(table.tier),
+}))
+
+export const riskDrivers = mysqlTable('risk_drivers', {
+  id: varchar('id', { length: 36 }).primaryKey(),
+  assessmentCycleId: varchar('assessment_cycle_id', { length: 36 }).notNull(),
+  title: varchar('title', { length: 255 }).notNull(),
+  riskType: varchar('risk_type', { length: 60 }).notNull(),
+  severity: int('severity').notNull().default(0),
+  priorityScore: int('priority_score').notNull().default(0),
+  rank: int('rank').notNull().default(0),
+  affectedService: varchar('affected_service', { length: 120 }),
+  createdAt: datetime('created_at', { mode: 'date' }).notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  cycleIdx: index('rd_cycle_idx').on(table.assessmentCycleId),
+  rankIdx: index('rd_rank_idx').on(table.rank),
+}))
+
+export const evidenceItems = mysqlTable('evidence_items', {
+  id: varchar('id', { length: 36 }).primaryKey(),
+  assessmentCycleId: varchar('assessment_cycle_id', { length: 36 }).notNull(),
+  questionCode: varchar('question_code', { length: 60 }).notNull(),
+  type: varchar('type', { length: 20 }).notNull(), // photo | document | url | note
+  fileUrl: varchar('file_url', { length: 600 }),
+  note: text('note'),
+  capturedAt: datetime('captured_at', { mode: 'date' }).notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  cycleIdx: index('ei_cycle_idx').on(table.assessmentCycleId),
+  questionIdx: index('ei_question_idx').on(table.questionCode),
+}))
+
+export const recommendationItems = mysqlTable('recommendation_items', {
+  id: varchar('id', { length: 36 }).primaryKey(),
+  assessmentCycleId: varchar('assessment_cycle_id', { length: 36 }).notNull(),
+  moduleSource: varchar('module_source', { length: 30 }).notNull(), // energy | operations | climate | integrated
+  title: varchar('title', { length: 255 }).notNull(),
+  description: text('description'),
+  priority: varchar('priority', { length: 20 }).notNull().default('medium'), // high | medium | low
+  horizon: varchar('horizon', { length: 20 }).notNull().default('medium'), // immediate | medium | capital
+  ownerType: varchar('owner_type', { length: 40 }), // facility | admin | technician | partner
+  dueDays: int('due_days'),
+  costBand: varchar('cost_band', { length: 20 }), // low | medium | high
+  expectedSavings: decimal('expected_savings', { precision: 12, scale: 2 }),
+  expectedResilienceGain: int('expected_resilience_gain'),
+  expectedEfficiencyGain: int('expected_efficiency_gain'),
+  kpi: varchar('kpi', { length: 255 }),
+  evidenceRequired: boolean('evidence_required').notNull().default(false),
+  explanation: text('explanation'), // what/why/evidence used
+  createdAt: datetime('created_at', { mode: 'date' }).notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: datetime('updated_at', { mode: 'date' }).notNull().default(sql`CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`),
+}, (table) => ({
+  cycleIdx: index('ri_cycle_idx').on(table.assessmentCycleId),
+  priorityIdx: index('ri_priority_idx').on(table.priority),
+  horizonIdx: index('ri_horizon_idx').on(table.horizon),
+}))
+
+export const followUpTasks = mysqlTable('follow_up_tasks', {
+  id: varchar('id', { length: 36 }).primaryKey(),
+  recommendationId: varchar('recommendation_id', { length: 36 }).notNull(),
+  facilityId: varchar('facility_id', { length: 36 }).notNull(),
+  ownerName: varchar('owner_name', { length: 120 }),
+  dueDate: datetime('due_date', { mode: 'date' }),
+  status: varchar('status', { length: 20 }).notNull().default('open'), // open | in_progress | done | cancelled
+  completionNote: text('completion_note'),
+  createdAt: datetime('created_at', { mode: 'date' }).notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: datetime('updated_at', { mode: 'date' }).notNull().default(sql`CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`),
+}, (table) => ({
+  facilityIdx: index('fut_facility_idx').on(table.facilityId),
+  recIdx: index('fut_rec_idx').on(table.recommendationId),
+  statusIdx: index('fut_status_idx').on(table.status),
+  dueIdx: index('fut_due_idx').on(table.dueDate),
+}))
+
+export const reportArtifacts = mysqlTable('report_artifacts', {
+  id: varchar('id', { length: 36 }).primaryKey(),
+  assessmentCycleId: varchar('assessment_cycle_id', { length: 36 }).notNull(),
+  reportType: varchar('report_type', { length: 40 }).notNull(), // manager | investor | engineering
+  fileUrl: varchar('file_url', { length: 600 }),
+  createdAt: datetime('created_at', { mode: 'date' }).notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  cycleIdx: index('ra_cycle_idx').on(table.assessmentCycleId),
+  typeIdx: index('ra_type_idx').on(table.reportType),
+}))
+
+/**
  * Push subscriptions table for Web Push notifications
  */
 export const pushSubscriptions = mysqlTable('push_subscriptions', {

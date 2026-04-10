@@ -719,12 +719,10 @@ export function AfyaSolarSizingTool({
                       <TableHead className="min-w-[140px]">Device</TableHead>
                       <TableHead className="min-w-[100px]">Category</TableHead>
                       <TableHead className="min-w-[120px]">Criticality</TableHead>
-                      <TableHead className="w-20">W (W)</TableHead>
-                      <TableHead className="w-16">Qty</TableHead>
-                      <TableHead className="w-20">h/day</TableHead>
-                      <TableHead className="min-w-[90px]">kWh/d</TableHead>
-                      <TableHead className="min-w-[80px]">Backup</TableHead>
-                      <TableHead className="min-w-[100px]">Zone</TableHead>
+                      <TableHead className="w-28 text-right">Watt</TableHead>
+                      <TableHead className="w-24 text-right">Quantity</TableHead>
+                      <TableHead className="w-24">hours/day</TableHead>
+                      <TableHead className="min-w-[110px] text-right">kWh/day</TableHead>
                       <TableHead className="w-12" />
                     </TableRow>
                   </TableHeader>
@@ -782,8 +780,11 @@ export function AfyaSolarSizingTool({
                               type="number"
                               value={device.wattage === 0 ? "" : device.wattage}
                               onChange={(e) => updateDevice(device.id, "wattage", Number(e.target.value))}
-                              placeholder="W"
-                              className="h-9"
+                              placeholder="e.g. 120"
+                              min={0}
+                              step={1}
+                              inputMode="numeric"
+                              className="h-9 text-right tabular-nums"
                             />
                           </TableCell>
                           <TableCell>
@@ -791,7 +792,11 @@ export function AfyaSolarSizingTool({
                               type="number"
                               value={device.quantity === 0 ? "" : device.quantity}
                               onChange={(e) => updateDevice(device.id, "quantity", Number(e.target.value))}
-                              className="h-9"
+                              placeholder="e.g. 2"
+                              min={0}
+                              step={1}
+                              inputMode="numeric"
+                              className="h-9 text-right tabular-nums"
                             />
                           </TableCell>
                           <TableCell>
@@ -799,26 +804,16 @@ export function AfyaSolarSizingTool({
                               type="number"
                               value={device.hoursPerDay === 0 ? "" : device.hoursPerDay}
                               onChange={(e) => updateDevice(device.id, "hoursPerDay", Number(e.target.value))}
-                              className="h-9"
+                              placeholder="e.g. 6"
+                              min={0}
+                              max={24}
+                              step={0.5}
+                              inputMode="decimal"
+                              className="h-9 text-right tabular-nums"
                             />
                           </TableCell>
-                          <TableCell className="font-mono text-sm">
+                          <TableCell className="font-mono text-sm text-right tabular-nums">
                             {dailyKwh.toFixed(2)}
-                          </TableCell>
-                          <TableCell>
-                            <Checkbox
-                              checked={device.backupRequired}
-                              onCheckedChange={(c) => updateDevice(device.id, "backupRequired", c === true)}
-                              aria-label="Backup required"
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              value={device.room}
-                              onChange={(e) => updateDevice(device.id, "room", e.target.value)}
-                              placeholder="Room"
-                              className="h-9 text-xs"
-                            />
                           </TableCell>
                           <TableCell>
                             <Button variant="ghost" size="sm" onClick={() => removeDevice(device.id)}>
@@ -856,30 +851,43 @@ export function AfyaSolarSizingTool({
                         <CardContent className="px-4 pb-4 space-y-3 text-xs">
                           <div className="grid grid-cols-3 gap-2">
                             <div>
-                              <Label className="text-[10px]">W</Label>
+                              <Label className="text-[10px]">Watt</Label>
                               <Input
                                 type="number"
                                 className="h-8 mt-0.5"
                                 value={device.wattage === 0 ? "" : device.wattage}
                                 onChange={(e) => updateDevice(device.id, "wattage", Number(e.target.value))}
+                                placeholder="120"
+                                min={0}
+                                step={1}
+                                inputMode="numeric"
                               />
                             </div>
                             <div>
-                              <Label className="text-[10px]">Qty</Label>
+                              <Label className="text-[10px]">Quantity</Label>
                               <Input
                                 type="number"
                                 className="h-8 mt-0.5"
                                 value={device.quantity === 0 ? "" : device.quantity}
                                 onChange={(e) => updateDevice(device.id, "quantity", Number(e.target.value))}
+                                placeholder="2"
+                                min={0}
+                                step={1}
+                                inputMode="numeric"
                               />
                             </div>
                             <div>
-                              <Label className="text-[10px]">h/d</Label>
+                              <Label className="text-[10px]">hours/day</Label>
                               <Input
                                 type="number"
                                 className="h-8 mt-0.5"
                                 value={device.hoursPerDay === 0 ? "" : device.hoursPerDay}
                                 onChange={(e) => updateDevice(device.id, "hoursPerDay", Number(e.target.value))}
+                                placeholder="6"
+                                min={0}
+                                max={24}
+                                step={0.5}
+                                inputMode="decimal"
                               />
                             </div>
                           </div>
@@ -887,22 +895,7 @@ export function AfyaSolarSizingTool({
                             <span className="text-emerald-900">Daily kWh</span>
                             <span className="font-mono font-semibold text-emerald-800">{dailyKwh.toFixed(2)}</span>
                           </div>
-                          <div className="flex flex-wrap gap-2 items-center">
-                            <Checkbox
-                              id={`bk-${device.id}`}
-                              checked={device.backupRequired}
-                              onCheckedChange={(c) => updateDevice(device.id, "backupRequired", c === true)}
-                            />
-                            <Label htmlFor={`bk-${device.id}`} className="text-xs font-normal">
-                              Backup
-                            </Label>
-                          </div>
-                          <Input
-                            placeholder="Room / zone"
-                            value={device.room}
-                            onChange={(e) => updateDevice(device.id, "room", e.target.value)}
-                            className="h-8 text-xs"
-                          />
+                          {/* Backup + zone intentionally hidden per UX request */}
                           <div className="grid grid-cols-2 gap-2">
                             <Select value={device.category} onValueChange={(v) => updateDevice(device.id, "category", v as DeviceCategoryId)}>
                               <SelectTrigger className="h-8 text-xs">
@@ -1154,8 +1147,8 @@ export function AfyaSolarSizingTool({
                   <TableHeader>
                     <TableRow>
                       <TableHead>Device</TableHead>
-                      <TableHead>Watts</TableHead>
-                      <TableHead>Qty</TableHead>
+                      <TableHead>Watt</TableHead>
+                      <TableHead>Quantity</TableHead>
                       <TableHead>Hours/Day</TableHead>
                       <TableHead>Daily kWh</TableHead>
                       <TableHead>% of Total</TableHead>

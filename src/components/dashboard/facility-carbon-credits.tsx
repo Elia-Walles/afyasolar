@@ -52,7 +52,7 @@ interface FacilityCarbonCreditsProps {
 }
 
 export function FacilityCarbonCredits({ facilityId }: FacilityCarbonCreditsProps) {
-  const [selectedDevice, setSelectedDevice] = useState<string>('all')
+  const [selectedDevice, setSelectedDevice] = useState<string>('')
   const [selectedPeriod, setSelectedPeriod] = useState<string>('monthly')
   const [isCalculatorOpen, setIsCalculatorOpen] = useState(false)
   const [startDate, setStartDate] = useState<string>('')
@@ -75,7 +75,7 @@ export function FacilityCarbonCredits({ facilityId }: FacilityCarbonCreditsProps
     queryFn: async (): Promise<CarbonCredit[]> => {
       const params = new URLSearchParams({
         facilityId,
-        ...(selectedDevice && selectedDevice !== 'all' && { deviceId: selectedDevice }),
+        ...(selectedDevice && { deviceId: selectedDevice }),
         ...(selectedPeriod && selectedPeriod !== 'all' && { period: selectedPeriod }),
         limit: '12'
       })
@@ -343,7 +343,7 @@ export function FacilityCarbonCredits({ facilityId }: FacilityCarbonCreditsProps
                 <SelectValue placeholder="All Devices" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Devices</SelectItem>
+                <SelectItem value="">All Devices</SelectItem>
                 {devices.map((device: any) => (
                   <SelectItem key={device.id} value={device.id}>
                     {device.name || device.serialNumber}

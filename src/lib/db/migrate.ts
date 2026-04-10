@@ -207,39 +207,43 @@ async function createTablesDirectly(connection: any, dbName: string) {
   console.log('✅ Created admins table')
 
   // Create facilities table
-  await connection.query(`
-    CREATE TABLE IF NOT EXISTS \`facilities\` (
-      \`id\` varchar(36) NOT NULL,
-      \`name\` varchar(255) NOT NULL,
-      \`address\` text NOT NULL,
-      \`city\` varchar(100) NOT NULL,
-      \`region\` varchar(100) NOT NULL,
-      \`region_id\` bigint NULL,
-      \`district_id\` bigint NULL,
-      \`phone\` varchar(20) NOT NULL,
-      \`email\` varchar(255) NOT NULL,
-      \`password\` varchar(255) NOT NULL,
-      \`email_verified\` boolean NOT NULL DEFAULT true,
-      \`status\` varchar(20) NOT NULL DEFAULT 'active',
-      \`payment_model\` varchar(20) NOT NULL DEFAULT 'payg',
-      \`credit_balance\` decimal(12,2) NOT NULL DEFAULT '0.00',
-      \`monthly_consumption\` decimal(10,2) NOT NULL DEFAULT '0.00',
-      \`system_size\` varchar(50),
-      \`failed_login_attempts\` int NOT NULL DEFAULT 0,
-      \`account_locked_until\` datetime,
-      \`last_login_at\` datetime,
-      \`created_at\` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      \`updated_at\` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      PRIMARY KEY (\`id\`),
-      UNIQUE KEY \`email\` (\`email\`),
-      KEY \`facility_email_idx\` (\`email\`),
-      KEY \`status_idx\` (\`status\`),
-      KEY \`region_idx\` (\`region\`),
-      KEY \`facility_region_id_idx\` (\`region_id\`),
-      KEY \`facility_district_id_idx\` (\`district_id\`)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-  `)
-  console.log('✅ Created facilities table')
+  try {
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS \`facilities\` (
+        \`id\` varchar(36) NOT NULL,
+        \`name\` varchar(255) NOT NULL,
+        \`address\` text NOT NULL,
+        \`city\` varchar(100) NOT NULL,
+        \`region\` varchar(100) NOT NULL,
+        \`region_id\` bigint NULL,
+        \`district_id\` bigint NULL,
+        \`phone\` varchar(20) NOT NULL,
+        \`email\` varchar(255) NOT NULL,
+        \`password\` varchar(255) NOT NULL,
+        \`email_verified\` boolean NOT NULL DEFAULT true,
+        \`status\` varchar(20) NOT NULL DEFAULT 'active',
+        \`payment_model\` varchar(20) NOT NULL DEFAULT 'payg',
+        \`credit_balance\` decimal(12,2) NOT NULL DEFAULT '0.00',
+        \`monthly_consumption\` decimal(10,2) NOT NULL DEFAULT '0.00',
+        \`system_size\` varchar(50),
+        \`failed_login_attempts\` int NOT NULL DEFAULT 0,
+        \`account_locked_until\` datetime,
+        \`last_login_at\` datetime,
+        \`created_at\` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`updated_at\` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`id\`),
+        UNIQUE KEY \`email\` (\`email\`),
+        KEY \`facility_email_idx\` (\`email\`),
+        KEY \`status_idx\` (\`status\`),
+        KEY \`region_idx\` (\`region\`),
+        KEY \`facility_region_id_idx\` (\`region_id\`),
+        KEY \`facility_district_id_idx\` (\`district_id\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `)
+    console.log('✅ Created facilities table')
+  } catch (error: any) {
+    console.warn('⚠️  Could not create facilities table (continuing):', error.message)
+  }
 
   // Update existing facilities table to add auth fields if they don't exist
   try {
@@ -1417,34 +1421,38 @@ async function createTablesDirectly(connection: any, dbName: string) {
   console.log('✅ Created patients table')
 
   // Create appointments table
-  await connection.query(`
-    CREATE TABLE IF NOT EXISTS \`appointments\` (
-      \`id\` varchar(36) NOT NULL,
-      \`facility_id\` varchar(36) NOT NULL,
-      \`department_id\` varchar(36) NOT NULL,
-      \`doctor_id\` varchar(36) NOT NULL,
-      \`patient_id\` varchar(36) NOT NULL,
-      \`time_slot_id\` varchar(36) NOT NULL,
-      \`status\` enum('pending','confirmed','cancelled','completed','no_show') NOT NULL DEFAULT 'pending',
-      \`source\` enum('web','whatsapp') NOT NULL DEFAULT 'web',
-      \`notes\` text,
-      \`ai_intake_summary_id\` varchar(36),
-      \`appointment_number\` varchar(255) NOT NULL,
-      \`access_code\` varchar(6) NULL,
-      \`created_at\` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      \`updated_at\` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      PRIMARY KEY (\`id\`),
-      KEY \`appointment_facility_idx\` (\`facility_id\`),
-      KEY \`appointment_department_idx\` (\`department_id\`),
-      KEY \`appointment_doctor_idx\` (\`doctor_id\`),
-      KEY \`appointment_patient_idx\` (\`patient_id\`),
-      KEY \`appointment_time_slot_idx\` (\`time_slot_id\`),
-      KEY \`appointment_status_idx\` (\`status\`),
-      KEY \`appointment_number_idx\` (\`appointment_number\`),
-      KEY \`appointment_access_code_idx\` (\`access_code\`)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-  `)
-  console.log('✅ Created appointments table')
+  try {
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS \`appointments\` (
+        \`id\` varchar(36) NOT NULL,
+        \`facility_id\` varchar(36) NOT NULL,
+        \`department_id\` varchar(36) NOT NULL,
+        \`doctor_id\` varchar(36) NOT NULL,
+        \`patient_id\` varchar(36) NOT NULL,
+        \`time_slot_id\` varchar(36) NOT NULL,
+        \`status\` enum('pending','confirmed','cancelled','completed','no_show') NOT NULL DEFAULT 'pending',
+        \`source\` enum('web','whatsapp') NOT NULL DEFAULT 'web',
+        \`notes\` text,
+        \`ai_intake_summary_id\` varchar(36),
+        \`appointment_number\` varchar(255) NOT NULL,
+        \`access_code\` varchar(6) NULL,
+        \`created_at\` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`updated_at\` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`id\`),
+        KEY \`appointment_facility_idx\` (\`facility_id\`),
+        KEY \`appointment_department_idx\` (\`department_id\`),
+        KEY \`appointment_doctor_idx\` (\`doctor_id\`),
+        KEY \`appointment_patient_idx\` (\`patient_id\`),
+        KEY \`appointment_time_slot_idx\` (\`time_slot_id\`),
+        KEY \`appointment_status_idx\` (\`status\`),
+        KEY \`appointment_number_idx\` (\`appointment_number\`),
+        KEY \`appointment_access_code_idx\` (\`access_code\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `)
+    console.log('✅ Created appointments table')
+  } catch (error: any) {
+    console.warn('⚠️  Could not create appointments table (continuing):', error.message)
+  }
   
   // Add access_code column to existing appointments table if it doesn't exist
   try {
@@ -1558,11 +1566,33 @@ async function createTablesDirectly(connection: any, dbName: string) {
         AND COLUMN_NAME = 'id'
     `, [dbName])
 
+    const facilityIdColumnType =
+      facilityIdInfo && facilityIdInfo.length > 0 && facilityIdInfo[0]?.COLUMN_TYPE
+        ? String(facilityIdInfo[0].COLUMN_TYPE)
+        : 'varchar(36)'
+
+    const facilityIdCharset =
+      facilityIdInfo && facilityIdInfo.length > 0 && facilityIdInfo[0]?.CHARACTER_SET_NAME
+        ? String(facilityIdInfo[0].CHARACTER_SET_NAME)
+        : null
+    const facilityIdCollation =
+      facilityIdInfo && facilityIdInfo.length > 0 && facilityIdInfo[0]?.COLLATION_NAME
+        ? String(facilityIdInfo[0].COLLATION_NAME)
+        : null
+
+    const facilityIdColumnDef = (() => {
+      const t = facilityIdColumnType.toLowerCase()
+      if ((t.startsWith('varchar') || t.startsWith('char')) && facilityIdCharset && facilityIdCollation) {
+        return `${facilityIdColumnType} CHARACTER SET ${facilityIdCharset} COLLATE ${facilityIdCollation}`
+      }
+      return facilityIdColumnType
+    })()
+
     // Create table without foreign keys first
     await connection.query(`
       CREATE TABLE IF NOT EXISTS \`facility_feedback\` (
         \`id\` varchar(36) NOT NULL,
-        \`facility_id\` varchar(36) NOT NULL,
+        \`facility_id\` ${facilityIdColumnDef} NOT NULL,
         \`appointment_id\` varchar(36) NULL,
         \`feedback_number\` varchar(255) NOT NULL,
         \`user_role\` enum('patient','visitor','relative','caregiver') NOT NULL,
@@ -1598,54 +1628,92 @@ async function createTablesDirectly(connection: any, dbName: string) {
 
     // Now try to add foreign keys if they don't exist
     if (facilityIdInfo && facilityIdInfo.length > 0) {
-      // Check if foreign key already exists
-      const [existingFKs]: any = await connection.query(`
-        SELECT CONSTRAINT_NAME
-        FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS
-        WHERE TABLE_SCHEMA = ?
-          AND TABLE_NAME = 'facility_feedback'
-          AND CONSTRAINT_TYPE = 'FOREIGN KEY'
-          AND CONSTRAINT_NAME = 'facility_feedback_ibfk_1'
-      `, [dbName])
-
-      if (existingFKs.length === 0) {
+      try {
+        // Ensure facility_feedback.facility_id column type/charset/collation matches facilities.id
         try {
-          await connection.query(`
-            ALTER TABLE \`facility_feedback\`
-            ADD CONSTRAINT \`facility_feedback_ibfk_1\`
-            FOREIGN KEY (\`facility_id\`) REFERENCES \`facilities\` (\`id\`) ON DELETE CASCADE
-          `)
-          console.log('✅ Added facility_id foreign key')
-        } catch (fkError: any) {
-          if (fkError.code !== 'ER_DUP_KEY') {
+          const [feedbackFacilityIdInfo]: any = await connection.query(`
+            SELECT COLUMN_TYPE, CHARACTER_SET_NAME, COLLATION_NAME
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = ?
+              AND TABLE_NAME = 'facility_feedback'
+              AND COLUMN_NAME = 'facility_id'
+          `, [dbName])
+
+          const feedbackFacilityIdType =
+            feedbackFacilityIdInfo && feedbackFacilityIdInfo.length > 0 && feedbackFacilityIdInfo[0]?.COLUMN_TYPE
+              ? String(feedbackFacilityIdInfo[0].COLUMN_TYPE)
+              : null
+          const feedbackFacilityCharset =
+            feedbackFacilityIdInfo && feedbackFacilityIdInfo.length > 0 && feedbackFacilityIdInfo[0]?.CHARACTER_SET_NAME
+              ? String(feedbackFacilityIdInfo[0].CHARACTER_SET_NAME)
+              : null
+          const feedbackFacilityCollation =
+            feedbackFacilityIdInfo && feedbackFacilityIdInfo.length > 0 && feedbackFacilityIdInfo[0]?.COLLATION_NAME
+              ? String(feedbackFacilityIdInfo[0].COLLATION_NAME)
+              : null
+
+          const mismatch =
+            (feedbackFacilityIdType && feedbackFacilityIdType.toLowerCase() !== facilityIdColumnType.toLowerCase()) ||
+            (facilityIdCharset && feedbackFacilityCharset && feedbackFacilityCharset !== facilityIdCharset) ||
+            (facilityIdCollation && feedbackFacilityCollation && feedbackFacilityCollation !== facilityIdCollation)
+
+          if (mismatch) {
+            await connection.query(
+              `ALTER TABLE \`facility_feedback\` MODIFY COLUMN \`facility_id\` ${facilityIdColumnDef} NOT NULL`
+            )
+            console.log(`✅ Aligned facility_feedback.facility_id to ${facilityIdColumnDef}`)
+          }
+        } catch (alignError: any) {
+          console.warn('⚠️  Could not align facility_feedback.facility_id:', alignError.message)
+        }
+
+        // Check if foreign key already exists
+        const [existingFKs]: any = await connection.query(`
+          SELECT CONSTRAINT_NAME
+          FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS
+          WHERE TABLE_SCHEMA = ?
+            AND TABLE_NAME = 'facility_feedback'
+            AND CONSTRAINT_TYPE = 'FOREIGN KEY'
+            AND CONSTRAINT_NAME = 'facility_feedback_ibfk_1'
+        `, [dbName])
+
+        if (existingFKs.length === 0) {
+          try {
+            await connection.query(`
+              ALTER TABLE \`facility_feedback\`
+              ADD CONSTRAINT \`facility_feedback_ibfk_1\`
+              FOREIGN KEY (\`facility_id\`) REFERENCES \`facilities\` (\`id\`) ON DELETE CASCADE
+            `)
+            console.log('✅ Added facility_id foreign key')
+          } catch (fkError: any) {
             console.warn('⚠️  Could not add facility_id foreign key:', fkError.message)
           }
         }
-      }
 
-      // Check if appointment foreign key exists
-      const [existingAppFKs]: any = await connection.query(`
-        SELECT CONSTRAINT_NAME
-        FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS
-        WHERE TABLE_SCHEMA = ?
-          AND TABLE_NAME = 'facility_feedback'
-          AND CONSTRAINT_TYPE = 'FOREIGN KEY'
-          AND CONSTRAINT_NAME = 'facility_feedback_ibfk_2'
-      `, [dbName])
+        // Check if appointment foreign key exists
+        const [existingAppFKs]: any = await connection.query(`
+          SELECT CONSTRAINT_NAME
+          FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS
+          WHERE TABLE_SCHEMA = ?
+            AND TABLE_NAME = 'facility_feedback'
+            AND CONSTRAINT_TYPE = 'FOREIGN KEY'
+            AND CONSTRAINT_NAME = 'facility_feedback_ibfk_2'
+        `, [dbName])
 
-      if (existingAppFKs.length === 0) {
-        try {
-          await connection.query(`
-            ALTER TABLE \`facility_feedback\`
-            ADD CONSTRAINT \`facility_feedback_ibfk_2\`
-            FOREIGN KEY (\`appointment_id\`) REFERENCES \`appointments\` (\`id\`) ON DELETE SET NULL
-          `)
-          console.log('✅ Added appointment_id foreign key')
-        } catch (fkError: any) {
-          if (fkError.code !== 'ER_DUP_KEY') {
+        if (existingAppFKs.length === 0) {
+          try {
+            await connection.query(`
+              ALTER TABLE \`facility_feedback\`
+              ADD CONSTRAINT \`facility_feedback_ibfk_2\`
+              FOREIGN KEY (\`appointment_id\`) REFERENCES \`appointments\` (\`id\`) ON DELETE SET NULL
+            `)
+            console.log('✅ Added appointment_id foreign key')
+          } catch (fkError: any) {
             console.warn('⚠️  Could not add appointment_id foreign key:', fkError.message)
           }
         }
+      } catch (fkBlockError: any) {
+        console.warn('⚠️  Skipping facility_feedback foreign keys due to incompatibility:', fkBlockError.message)
       }
     }
   } catch (error: any) {
@@ -2386,6 +2454,241 @@ async function createTablesDirectly(connection: any, dbName: string) {
     console.log('✅ Created afya_finance_hub_requests table')
   } catch (error: any) {
     console.error('Error creating afya_finance_hub_requests table:', error.message)
+  }
+
+  // Create assessment_cycles table (Facility Intelligence v2.0)
+  try {
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS \`assessment_cycles\` (
+        \`id\` varchar(36) NOT NULL,
+        \`facility_id\` varchar(36) NOT NULL,
+        \`started_at\` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`completed_at\` datetime NULL,
+        \`status\` varchar(20) NOT NULL DEFAULT 'draft',
+        \`created_by\` varchar(120) NULL,
+        \`version\` varchar(20) NOT NULL DEFAULT '2.0',
+        \`created_at\` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`updated_at\` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`id\`),
+        KEY \`ac_facility_idx\` (\`facility_id\`),
+        KEY \`ac_status_idx\` (\`status\`),
+        KEY \`ac_started_idx\` (\`started_at\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `)
+    console.log('✅ Created assessment_cycles table')
+  } catch (error: any) {
+    console.error('Error creating assessment_cycles table:', error.message)
+  }
+
+  // Create climate_assessment_responses table
+  try {
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS \`climate_assessment_responses\` (
+        \`id\` varchar(36) NOT NULL,
+        \`assessment_cycle_id\` varchar(36) NOT NULL,
+        \`module_code\` varchar(10) NOT NULL,
+        \`question_code\` varchar(60) NOT NULL,
+        \`answer_value\` varchar(60) NOT NULL,
+        \`score\` int NOT NULL DEFAULT 0,
+        \`score_max\` int NOT NULL DEFAULT 0,
+        \`note\` text NULL,
+        \`confidence\` int NULL DEFAULT 100,
+        \`created_at\` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`updated_at\` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`id\`),
+        KEY \`car_cycle_idx\` (\`assessment_cycle_id\`),
+        KEY \`car_module_idx\` (\`module_code\`),
+        KEY \`car_question_idx\` (\`question_code\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `)
+    console.log('✅ Created climate_assessment_responses table')
+  } catch (error: any) {
+    console.error('Error creating climate_assessment_responses table:', error.message)
+  }
+
+  // Create climate_score_summaries table
+  try {
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS \`climate_score_summaries\` (
+        \`id\` varchar(36) NOT NULL,
+        \`assessment_cycle_id\` varchar(36) NOT NULL,
+        \`hes\` int NOT NULL DEFAULT 0,
+        \`csf\` int NOT NULL DEFAULT 0,
+        \`ecpq\` int NOT NULL DEFAULT 0,
+        \`edc\` int NOT NULL DEFAULT 0,
+        \`rrc\` int NOT NULL DEFAULT 0,
+        \`rcs\` int NOT NULL DEFAULT 0,
+        \`tier\` int NOT NULL DEFAULT 0,
+        \`critical_attention\` boolean NOT NULL DEFAULT false,
+        \`created_at\` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`updated_at\` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`id\`),
+        UNIQUE KEY \`css_cycle_uniq\` (\`assessment_cycle_id\`),
+        KEY \`css_cycle_idx\` (\`assessment_cycle_id\`),
+        KEY \`css_rcs_idx\` (\`rcs\`),
+        KEY \`css_tier_idx\` (\`tier\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `)
+    console.log('✅ Created climate_score_summaries table')
+  } catch (error: any) {
+    console.error('Error creating climate_score_summaries table:', error.message)
+  }
+
+  // Create risk_drivers table
+  try {
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS \`risk_drivers\` (
+        \`id\` varchar(36) NOT NULL,
+        \`assessment_cycle_id\` varchar(36) NOT NULL,
+        \`title\` varchar(255) NOT NULL,
+        \`risk_type\` varchar(60) NOT NULL,
+        \`severity\` int NOT NULL DEFAULT 0,
+        \`priority_score\` int NOT NULL DEFAULT 0,
+        \`rank\` int NOT NULL DEFAULT 0,
+        \`affected_service\` varchar(120) NULL,
+        \`created_at\` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`id\`),
+        KEY \`rd_cycle_idx\` (\`assessment_cycle_id\`),
+        KEY \`rd_rank_idx\` (\`rank\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `)
+    console.log('✅ Created risk_drivers table')
+  } catch (error: any) {
+    console.error('Error creating risk_drivers table:', error.message)
+  }
+
+  // Create evidence_items table
+  try {
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS \`evidence_items\` (
+        \`id\` varchar(36) NOT NULL,
+        \`assessment_cycle_id\` varchar(36) NOT NULL,
+        \`question_code\` varchar(60) NOT NULL,
+        \`type\` varchar(20) NOT NULL,
+        \`file_url\` varchar(600) NULL,
+        \`note\` text NULL,
+        \`captured_at\` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`id\`),
+        KEY \`ei_cycle_idx\` (\`assessment_cycle_id\`),
+        KEY \`ei_question_idx\` (\`question_code\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `)
+    console.log('✅ Created evidence_items table')
+  } catch (error: any) {
+    console.error('Error creating evidence_items table:', error.message)
+  }
+
+  // Create recommendation_items table
+  try {
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS \`recommendation_items\` (
+        \`id\` varchar(36) NOT NULL,
+        \`assessment_cycle_id\` varchar(36) NOT NULL,
+        \`module_source\` varchar(30) NOT NULL,
+        \`title\` varchar(255) NOT NULL,
+        \`description\` text NULL,
+        \`priority\` varchar(20) NOT NULL DEFAULT 'medium',
+        \`horizon\` varchar(20) NOT NULL DEFAULT 'medium',
+        \`owner_type\` varchar(40) NULL,
+        \`due_days\` int NULL,
+        \`cost_band\` varchar(20) NULL,
+        \`expected_savings\` decimal(12,2) NULL,
+        \`expected_resilience_gain\` int NULL,
+        \`expected_efficiency_gain\` int NULL,
+        \`kpi\` varchar(255) NULL,
+        \`evidence_required\` boolean NOT NULL DEFAULT false,
+        \`explanation\` text NULL,
+        \`created_at\` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`updated_at\` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`id\`),
+        KEY \`ri_cycle_idx\` (\`assessment_cycle_id\`),
+        KEY \`ri_priority_idx\` (\`priority\`),
+        KEY \`ri_horizon_idx\` (\`horizon\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `)
+    console.log('✅ Created recommendation_items table')
+  } catch (error: any) {
+    console.error('Error creating recommendation_items table:', error.message)
+  }
+
+  // Create follow_up_tasks table
+  try {
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS \`follow_up_tasks\` (
+        \`id\` varchar(36) NOT NULL,
+        \`recommendation_id\` varchar(36) NOT NULL,
+        \`facility_id\` varchar(36) NOT NULL,
+        \`owner_name\` varchar(120) NULL,
+        \`due_date\` datetime NULL,
+        \`status\` varchar(20) NOT NULL DEFAULT 'open',
+        \`completion_note\` text NULL,
+        \`created_at\` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`updated_at\` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`id\`),
+        KEY \`fut_facility_idx\` (\`facility_id\`),
+        KEY \`fut_rec_idx\` (\`recommendation_id\`),
+        KEY \`fut_status_idx\` (\`status\`),
+        KEY \`fut_due_idx\` (\`due_date\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `)
+    console.log('✅ Created follow_up_tasks table')
+  } catch (error: any) {
+    console.error('Error creating follow_up_tasks table:', error.message)
+  }
+
+  // Create report_artifacts table
+  try {
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS \`report_artifacts\` (
+        \`id\` varchar(36) NOT NULL,
+        \`assessment_cycle_id\` varchar(36) NOT NULL,
+        \`report_type\` varchar(40) NOT NULL,
+        \`file_url\` varchar(600) NULL,
+        \`created_at\` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`id\`),
+        KEY \`ra_cycle_idx\` (\`assessment_cycle_id\`),
+        KEY \`ra_type_idx\` (\`report_type\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `)
+    console.log('✅ Created report_artifacts table')
+  } catch (error: any) {
+    console.error('Error creating report_artifacts table:', error.message)
+  }
+
+  // Create carbon_credits table
+  try {
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS \`carbon_credits\` (
+        \`id\` varchar(36) NOT NULL,
+        \`device_id\` varchar(36) NOT NULL,
+        \`facility_id\` varchar(36) NOT NULL,
+        \`period\` varchar(40) NOT NULL,
+        \`start_date\` datetime NOT NULL,
+        \`end_date\` datetime NOT NULL,
+        \`energy_generated_kwh\` decimal(12,2) NOT NULL DEFAULT '0.00',
+        \`co2_saved_kg\` decimal(12,2) NOT NULL DEFAULT '0.00',
+        \`credits_earned_tons\` decimal(12,4) NOT NULL DEFAULT '0.0000',
+        \`credit_value_usd\` decimal(10,2) NOT NULL DEFAULT '0.00',
+        \`total_value_usd\` decimal(12,2) NOT NULL DEFAULT '0.00',
+        \`verification_status\` varchar(20) NOT NULL DEFAULT 'pending',
+        \`certificate_id\` varchar(80) NULL,
+        \`verified_at\` datetime NULL,
+        \`verified_by\` varchar(255) NULL,
+        \`notes\` text NULL,
+        \`metadata\` json NULL,
+        \`created_at\` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`updated_at\` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`id\`),
+        KEY \`cc_facility_idx\` (\`facility_id\`),
+        KEY \`cc_device_idx\` (\`device_id\`),
+        KEY \`cc_status_idx\` (\`verification_status\`),
+        KEY \`cc_period_idx\` (\`period\`),
+        KEY \`cc_start_idx\` (\`start_date\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `)
+    console.log('✅ Created carbon_credits table')
+  } catch (error: any) {
+    console.error('Error creating carbon_credits table:', error.message)
   }
 
 /**

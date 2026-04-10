@@ -15,6 +15,7 @@ import {
   Battery,
   BarChart3,
   Calendar,
+  Clock,
   TrendingDown,
   Gauge,
   Menu,
@@ -37,9 +38,6 @@ import {
   Download
 } from "lucide-react"
 import Image from "next/image"
-import { PaygControl } from "@/components/payg-control"
-import { DeviceClaiming } from "@/components/device-claiming"
-import { DeviceRequestForm } from "@/components/dashboard/device-request-form"
 import { LogoutButton } from "@/components/logout-button"
 import { FacilitySettings } from "@/components/facility-settings"
 import { FeatureRequestDialog } from "@/components/dashboard/feature-request-dialog"
@@ -64,6 +62,7 @@ import type { Facility, LiveEnergyData } from "@/types"
 import { cn } from "@/lib/utils"
 import { useRouter, useSearchParams } from "next/navigation"
 import { toast } from "sonner"
+import { ServiceAccessPaymentDialog } from "@/components/services/service-access-payment-dialog"
 
 interface FacilityDashboardContentProps {
   facility?: Facility | null
@@ -116,6 +115,8 @@ export function FacilityDashboardContent({
   const { data: invoiceRequests } = useAfyaSolarInvoiceRequests(facilityId)
   const { data: afyaSolarSubscriber } = useAfyaSolarSubscribers(facilityId)
   const subscribeMutation = useSubscribe()
+
+  const [paymentDialogOpen, setPaymentDialogOpen] = useState(false)
   
   const { refetch: refetchSubscriptions } = useSubscriptions(facilityId)
 
@@ -125,21 +126,7 @@ export function FacilityDashboardContent({
   const [bmiSummary, setBmiSummary] = useState<{ score: number | null; bmiPercent: number | null } | null>(null)
   const [sectionScores, setSectionScores] = useState<SectionScores | null>(null)
   
-  // Debug logging
-  console.log('[AfyaSolarDashboard][Facility]', {
-    facilityId,
-    name: facility?.name,
-    paymentModel: facility?.paymentModel,
-    creditBalance: facility?.creditBalance,
-    monthlyConsumption: facility?.monthlyConsumption,
-  })
-  console.log('[AfyaSolarDashboard][Subscriber]', afyaSolarSubscriber)
-  console.log('[AfyaSolarDashboard][Payments]', {
-    serviceAccessPaymentsCount: serviceAccessPayments?.length || 0,
-    serviceAccessPaymentIds: serviceAccessPayments?.map((p: any) => p.id) || [],
-    invoiceRequestsCount: invoiceRequests?.length || 0,
-    invoiceRequestIds: invoiceRequests?.map((r: any) => r.id) || [],
-  })
+  // Avoid noisy logs in the dashboard; keep this screen production-ready.
   
   // Refetch subscription check after successful subscription
   useEffect(() => {
@@ -150,6 +137,38 @@ export function FacilityDashboardContent({
   const searchParams = useSearchParams()
   const [subscribingTo, setSubscribingTo] = useState<string | null>(null)
   const [timeRange, setTimeRange] = useState<'today' | 'week' | 'month'>('today')
+
+  const mapPlanTypeToPaymentPlan = (
+    planType?: string | null
+  ): "cash" | "installment" | "paas" | undefined => {
+    const v = (planType || '').toUpperCase().trim()
+    if (v === 'CASH') return 'cash'
+    if (v === 'INSTALLMENT') return 'installment'
+    if (v === 'PAAS' || v === 'EAAS') return 'paas'
+    return undefined
+  }
+
+  const openAfyaSolarPaymentDialog = () => {
+    if (!afyaSolarSubscriber) {
+      toast.error("No active Afya Solar package found for payments.")
+      return
+    }
+
+    if (!afyaSolarSubscriber.packageId || !afyaSolarSubscriber.packageName) {
+      toast.error("Your package details are missing. Please contact support.")
+      return
+    }
+
+    setPaymentDialogOpen(true)
+  }
+
+  const completedServiceAccessPayments = useMemo(() => {
+    return (serviceAccessPayments || []).filter((p: any) => p?.status === 'completed')
+  }, [serviceAccessPayments])
+
+  const pendingServiceAccessPayments = useMemo(() => {
+    return (serviceAccessPayments || []).filter((p: any) => p?.status && p.status !== 'completed')
+  }, [serviceAccessPayments])
 
 
   // Use admin-provided section or fall back to internal state
@@ -177,9 +196,6 @@ export function FacilityDashboardContent({
       const section = searchParams?.get('section')
       if (section === 'subscription') {
         setInternalActiveSection('subscription')
-      }
-      if (section === 'energy-efficiency') {
-        setInternalActiveSection('energy-efficiency')
       }
       if (section === 'report') {
         setInternalActiveSection('report')
@@ -362,7 +378,9 @@ export function FacilityDashboardContent({
 
         {/* Navigation */}
         <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
-          {navItems.map((item) => {
+          {navItems
+            .filter((item) => item.id !== 'devices' && item.id !== 'energy')
+            .map((item) => {
             const Icon = item.icon
             const isActive = currentActiveSection === item.id
             return (
@@ -678,66 +696,7 @@ export function FacilityDashboardContent({
                   </Card>
                 </div>
                 
-              {/* Quick Actions Section - only for facility self-service, not admin overview snapshots */}
-                {!adminMode && (
-                  <>
-                    <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
-                      <PaygControl facilityId={facilityId} />
-                      <DeviceClaiming />
-                    </div>
-                    
-                    {/* Device Request */}
-                    <Card className={panelCardClass}>
-                      <CardHeader>
-                        <CardTitle className="text-base font-semibold text-gray-900">Request New Device</CardTitle>
-                        <CardDescription className="text-xs text-gray-500">
-                          Need additional smart meters or devices? Request them here
-                        </CardDescription>
-                      </CardHeader>
-                      <CardContent>
-                        <DeviceRequestForm facility={facility} />
-                      </CardContent>
-                    </Card>
-                  </>
-                )}
-
-            {/* Recent Energy Data - hidden in admin overview-only view */}
-            {!adminMode && (
-              <Card className={panelCardClass}>
-                <CardHeader>
-                  <CardTitle className="text-base font-semibold text-gray-900">Recent Energy Data</CardTitle>
-                  <CardDescription className="text-xs text-gray-500">
-                    Latest energy consumption readings
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {energyData && energyData.length > 0 ? (
-                    <div className="space-y-2">
-                      {energyData.slice(0, 5).map((data: { id: Key | null | undefined; power: any; timestamp: string | number | Date; energy: any }) => (
-                        <div
-                          key={data.id}
-                          className="flex items-center justify-between p-3 border border-gray-100 rounded-lg hover:bg-gray-50 transition-colors"
-                        >
-                          <div>
-                            <p className="font-semibold text-gray-900">{Number(data.power).toFixed(2)} W</p>
-                            <p className="text-xs text-gray-500">
-                              {new Date(data.timestamp).toLocaleString()}
-                            </p>
-                          </div>
-                          <Badge variant="outline" className="bg-gray-50 text-gray-700 border-gray-200">
-                            {Number(data.energy).toFixed(2)} kWh
-                          </Badge>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-gray-500 text-center py-4">
-                      No energy data available yet
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
-            )}
+              {/* Facility self-service widgets intentionally hidden for now */}
             </>)}
 
             {currentActiveSection === 'devices' && (
@@ -782,8 +741,7 @@ export function FacilityDashboardContent({
                   ) : (
                     <div className="text-center py-8">
                       <Plug className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-                      <p className="text-gray-600 mb-4">No devices claimed yet</p>
-                      <DeviceClaiming />
+                      <p className="text-gray-600 mb-4">No devices available</p>
                     </div>
                   )}
                 </CardContent>
@@ -1099,6 +1057,19 @@ export function FacilityDashboardContent({
 
             {currentActiveSection === 'bills-payment' && (
               <div className="space-y-6">
+                <ServiceAccessPaymentDialog
+                  open={paymentDialogOpen}
+                  onOpenChange={setPaymentDialogOpen}
+                  serviceName="afya-solar"
+                  serviceDisplayName="Afya Solar"
+                  // This is the displayed amount; the server computes/validates Afya Solar pricing.
+                  amount={Number(afyaSolarSubscriber?.monthlyPaymentAmount ?? afyaSolarSubscriber?.totalPackagePrice ?? 1)}
+                  packageId={String(afyaSolarSubscriber?.packageId ?? '')}
+                  packageName={String(afyaSolarSubscriber?.packageName ?? '')}
+                  paymentPlan={mapPlanTypeToPaymentPlan(afyaSolarSubscriber?.planType)}
+                  packageMetadata={(afyaSolarSubscriber as any)?.metadata ?? {}}
+                />
+
                 {/* Bills Section */}
                 <Card className={panelCardClass}>
                   <CardHeader>
@@ -1187,13 +1158,15 @@ export function FacilityDashboardContent({
                           </div>
                           <h4 className="text-lg font-semibold text-yellow-900 mb-2">No Solar Package Found</h4>
                           <p className="text-sm text-yellow-700 mb-3">
-                            You don't have an active Afya Solar subscription yet.
+                            Your subscription details are not available yet. If you recently paid, wait a moment and refresh.
                           </p>
-                          <div className="text-xs text-yellow-600 bg-yellow-100 rounded p-2 text-left">
-                            <p className="font-semibold mb-2">Debug Info:</p>
-                            <p>Facility ID: {facilityId || 'Not found'}</p>
-                            <p>Facility Name: {facility?.name || 'Not found'}</p>
-                            <p>Afya Solar Subscriber: {afyaSolarSubscriber ? 'Found' : 'Not found'}</p>
+                          <div className="flex items-center justify-center gap-2">
+                            <Button size="sm" variant="outline" onClick={() => window.location.reload()}>
+                              Refresh
+                            </Button>
+                            <Button size="sm" className="bg-blue-600 hover:bg-blue-700 text-white" onClick={() => router.push("/services/afya-solar")}>
+                              Go to Afya Solar
+                            </Button>
                           </div>
                         </div>
                       </div>
@@ -1470,12 +1443,16 @@ export function FacilityDashboardContent({
                                   View Details
                                 </Button>
                                 {bill.status !== 'paid' && (
-                                  <Button size="sm" className="bg-blue-600 hover:bg-blue-700 text-white">
+                                  <Button
+                                    size="sm"
+                                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                                    onClick={openAfyaSolarPaymentDialog}
+                                  >
                                     <DollarSign className="w-4 h-4 mr-2" />
-                                    Pay Now
+                                    Pay Subscription
                                   </Button>
                                 )}
-                                <Button size="sm" variant="outline">
+                                <Button size="sm" variant="outline" disabled>
                                   <Download className="w-4 h-4 mr-2" />
                                   Download
                                 </Button>
@@ -1508,7 +1485,7 @@ export function FacilityDashboardContent({
                     {(serviceAccessPayments && serviceAccessPayments.length > 0) || (invoiceRequests && invoiceRequests.length > 0) ? (
                       <div className="space-y-6">
                         {/* Service Access Payments */}
-                        {serviceAccessPayments && serviceAccessPayments.length > 0 && (
+                        {completedServiceAccessPayments.length > 0 && (
                           <div>
                             <div className="flex items-center justify-between mb-4">
                               <h4 className="text-base font-semibold text-gray-700 flex items-center">
@@ -1516,11 +1493,11 @@ export function FacilityDashboardContent({
                                 Completed Payments
                               </h4>
                               <span className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded">
-                                {serviceAccessPayments.length} transaction{serviceAccessPayments.length !== 1 ? 's' : ''}
+                                {completedServiceAccessPayments.length} transaction{completedServiceAccessPayments.length !== 1 ? 's' : ''}
                               </span>
                             </div>
                             <div className="space-y-3">
-                              {serviceAccessPayments.slice(0, 5).map((payment: any) => (
+                              {completedServiceAccessPayments.slice(0, 5).map((payment: any) => (
                                 <div key={payment.id} className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
                                   <div className="flex items-center justify-between mb-3">
                                     <div className="flex items-center gap-3">
@@ -1562,13 +1539,71 @@ export function FacilityDashboardContent({
                                       Transaction ID: {payment.transactionId || 'N/A'}
                                     </div>
                                     <div className="flex gap-2">
-                                      <Button size="sm" variant="outline">
+                                      <Button size="sm" variant="outline" disabled>
                                         <Receipt className="w-4 h-4 mr-2" />
                                         Receipt
                                       </Button>
-                                      <Button size="sm" variant="outline">
+                                      <Button size="sm" variant="outline" disabled>
                                         <Download className="w-4 h-4 mr-2" />
                                         Download
+                                      </Button>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {pendingServiceAccessPayments.length > 0 && (
+                          <div>
+                            <div className="flex items-center justify-between mb-4">
+                              <h4 className="text-base font-semibold text-gray-700 flex items-center">
+                                <Clock className="w-5 h-5 mr-2 text-yellow-600" />
+                                Pending / Failed
+                              </h4>
+                              <span className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded">
+                                {pendingServiceAccessPayments.length} transaction{pendingServiceAccessPayments.length !== 1 ? 's' : ''}
+                              </span>
+                            </div>
+                            <div className="space-y-3">
+                              {pendingServiceAccessPayments.slice(0, 5).map((payment: any) => (
+                                <div key={payment.id} className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
+                                  <div className="flex items-center justify-between mb-3">
+                                    <div className="flex items-center gap-3">
+                                      <div className={`w-4 h-4 rounded-full ${
+                                        payment.status === 'failed' ? 'bg-red-500' : 'bg-yellow-500'
+                                      }`} />
+                                      <div>
+                                        <p className="text-lg font-semibold text-gray-900">{formatCurrency(payment.amount)}</p>
+                                        <p className="text-sm text-gray-600">
+                                          {payment.paymentMethod ? payment.paymentMethod.charAt(0).toUpperCase() + payment.paymentMethod.slice(1) : 'Unknown'} • 
+                                          {new Date(payment.createdAt).toLocaleDateString()}
+                                        </p>
+                                      </div>
+                                    </div>
+                                    <div className="text-right">
+                                      <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${
+                                        payment.status === 'failed'
+                                          ? 'bg-red-100 text-red-800'
+                                          : 'bg-yellow-100 text-yellow-800'
+                                      }`}>
+                                        {String(payment.status || 'pending').charAt(0).toUpperCase() + String(payment.status || 'pending').slice(1)}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div className="flex justify-between items-center pt-3 border-t border-gray-100">
+                                    <div className="text-xs text-gray-500">
+                                      Transaction ID: {payment.transactionId || 'N/A'}
+                                    </div>
+                                    <div className="flex gap-2">
+                                      <Button
+                                        size="sm"
+                                        className="bg-blue-600 hover:bg-blue-700 text-white"
+                                        onClick={openAfyaSolarPaymentDialog}
+                                      >
+                                        <DollarSign className="w-4 h-4 mr-2" />
+                                        Retry Payment
                                       </Button>
                                     </div>
                                   </div>
@@ -1632,9 +1667,8 @@ export function FacilityDashboardContent({
                                     </div>
                                     <div className="flex gap-2">
                                       {invoice.status === 'pending' && (
-                                        <Button size="sm" className="bg-blue-600 hover:bg-blue-700 text-white">
-                                          <DollarSign className="w-4 h-4 mr-2" />
-                                          Pay Invoice
+                                        <Button size="sm" variant="outline" disabled>
+                                          Awaiting invoice processing
                                         </Button>
                                       )}
                                       <Button size="sm" variant="outline">
