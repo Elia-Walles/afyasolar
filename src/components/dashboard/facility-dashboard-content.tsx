@@ -63,6 +63,17 @@ import { cn } from "@/lib/utils"
 import { useRouter, useSearchParams } from "next/navigation"
 import { toast } from "sonner"
 import { ServiceAccessPaymentDialog } from "@/components/services/service-access-payment-dialog"
+import {
+  ResponsiveContainer,
+  AreaChart,
+  Area,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid,
+} from "recharts"
 
 interface FacilityDashboardContentProps {
   facility?: Facility | null
@@ -322,6 +333,120 @@ export function FacilityDashboardContent({
   const carbonCreditEarned = Math.floor((metrics.totalSolarGeneration || 0) / 1000)
 
   const subscribedServices = useMemo(() => [] as { label: string; href: string; icon: typeof CreditCard }[], [])
+
+  const { data: overviewCarbonCredits = [] } = useQuery({
+    queryKey: ["overview-carbon-credits", facilityId],
+    queryFn: async () => {
+      if (!facilityId) return []
+      const params = new URLSearchParams({ facilityId, limit: "12" })
+      const res = await fetch(`/api/facility/carbon-credits/calculate?${params.toString()}`)
+      if (!res.ok) return []
+      const json = await res.json()
+      return Array.isArray(json?.data) ? json.data : []
+    },
+    enabled: !!facilityId && !adminMode,
+    initialData: [],
+    refetchInterval: 60000,
+  })
+
+  const overviewTrends = useMemo(() => {
+    const rows = (energyData || [])
+      .slice(-96) // keep it lightweight in overview
+      .map((d: any) => {
+        const ts = new Date(d.timestamp)
+        const label = ts.toLocaleDateString(undefined, { month: "short", day: "2-digit" })
+        return {
+          label,
+          consumption: Number(d.energy) || 0,
+          solar: Number(d.solarGeneration) || 0,
+          power: Number(d.power) || 0,
+        }
+      })
+
+    // downsample to avoid dense charts
+    const step = rows.length > 24 ? Math.ceil(rows.length / 24) : 1
+    return rows.filter((_: any, idx: number) => idx % step === 0)
+  }, [energyData])
+
+  const billingSummary = useMemo(() => {
+    const list = Array.isArray(bills) ? bills : []
+    const unpaid = list.filter((b: any) => b.status !== "paid")
+    const overdue = list.filter((b: any) => b.status === "overdue" || new Date(b.dueDate) < new Date())
+    const nextDue = unpaid
+      .map((b: any) => new Date(b.dueDate))
+      .sort((a, b) => a.getTime() - b.getTime())[0]
+    return {
+      totalBills: list.length,
+      unpaidCount: unpaid.length,
+      overdueCount: overdue.length,
+      nextDueDate: nextDue ? nextDue.toLocaleDateString() : null,
+      latestBillAmount: list[0]?.totalCost ? Number(list[0].totalCost) : null,
+    }
+  }, [bills])
+
+  const billsTrend = useMemo(() => {
+    const list = Array.isArray(bills) ? bills : []
+    // take latest 8 bills (oldest -> newest) for a simple trend
+    const rows = list
+      .slice()
+      .reverse()
+      .slice(0, 8)
+      .map((b: any) => ({
+        label: new Date(b.periodEnd || b.createdAt || Date.now()).toLocaleDateString(undefined, {
+          month: "short",
+          day: "2-digit",
+        }),
+        amount: Number(b.totalCost || 0),
+      }))
+    return rows
+  }, [bills])
+
+  const paymentSummary = useMemo(() => {
+    const list = Array.isArray(serviceAccessPayments) ? serviceAccessPayments : []
+    const completed = list.filter((p: any) => p.status === "completed")
+    const pending = list.filter((p: any) => p.status !== "completed")
+    const totalPaid = completed.reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0)
+    return {
+      completedCount: completed.length,
+      pendingCount: pending.length,
+      totalPaid,
+    }
+  }, [serviceAccessPayments])
+
+  const paymentsTrend = useMemo(() => {
+    const list = Array.isArray(serviceAccessPayments) ? serviceAccessPayments : []
+    const completed = list.filter((p: any) => p.status === "completed")
+
+    const byDay = new Map<string, number>()
+    for (const p of completed) {
+      const d = new Date(p.paidAt || p.createdAt || Date.now())
+      const key = new Date(d.getFullYear(), d.getMonth(), d.getDate()).toISOString().slice(0, 10)
+      byDay.set(key, (byDay.get(key) || 0) + Number(p.amount || 0))
+    }
+
+    return Array.from(byDay.entries())
+      .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+      .slice(-14)
+      .map(([key, total]) => ({
+        label: new Date(key).toLocaleDateString(undefined, { month: "short", day: "2-digit" }),
+        amount: total,
+      }))
+  }, [serviceAccessPayments])
+
+  const creditsSummary = useMemo(() => {
+    const list = Array.isArray(overviewCarbonCredits) ? overviewCarbonCredits : []
+    const totalCredits = list.reduce((sum: number, c: any) => sum + Number(c.creditsEarnedTons || c.creditsEarned || 0), 0)
+    const totalValue = list.reduce((sum: number, c: any) => sum + Number(c.totalValueUsd || c.totalValue || 0), 0)
+    const chart = list
+      .slice()
+      .reverse()
+      .map((c: any) => ({
+        label: String(c.period || "").slice(0, 10) || new Date(c.startDate || c.createdAt || Date.now()).toLocaleDateString(),
+        credits: Number(c.creditsEarnedTons || c.creditsEarned || 0),
+        co2: Number(c.co2SavedKg || c.co2Saved || 0),
+      }))
+    return { totalCredits, totalValue, chart }
+  }, [overviewCarbonCredits])
 
   return (
     <div className="h-screen bg-gray-50 flex overflow-hidden">
@@ -696,6 +821,287 @@ export function FacilityDashboardContent({
                   </Card>
                 </div>
                 
+                {/* Analytics sections */}
+                <div className="grid gap-4 grid-cols-1 lg:grid-cols-3">
+                  <Card className={cn(panelCardClass, "lg:col-span-2 rounded-2xl")}>
+                    <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                      <div>
+                        <CardTitle className={sectionTitleClass}>Energy Efficiency Analytics</CardTitle>
+                        <CardDescription className={metaTextClass}>
+                          Consumption, solar generation, and efficiency indicators
+                        </CardDescription>
+                      </div>
+                      <Button variant="outline" size="sm" onClick={() => setCurrentSection("energy-efficiency")}>
+                        View Energy Efficiency
+                      </Button>
+                    </CardHeader>
+                    <CardContent className="pt-2">
+                      {overviewTrends.length === 0 ? (
+                        <div className="text-sm text-gray-500 py-8 text-center">
+                          No energy trend data yet.
+                        </div>
+                      ) : (
+                        <div className="h-64">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <AreaChart data={overviewTrends} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                              <defs>
+                                <linearGradient id="consumptionGradient" x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.25} />
+                                  <stop offset="95%" stopColor="#10b981" stopOpacity={0.05} />
+                                </linearGradient>
+                                <linearGradient id="solarGradient" x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.20} />
+                                  <stop offset="95%" stopColor="#f59e0b" stopOpacity={0.04} />
+                                </linearGradient>
+                              </defs>
+                              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                              <XAxis dataKey="label" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
+                              <YAxis tick={{ fontSize: 11 }} width={36} />
+                              <Tooltip
+                                contentStyle={{ fontSize: 12, borderRadius: 12 }}
+                                formatter={(value: any, name: any) => [
+                                  Number(value).toFixed(2),
+                                  name === "consumption" ? "Consumption (kWh)" : name === "solar" ? "Solar (kWh)" : name,
+                                ]}
+                              />
+                              <Area
+                                type="monotone"
+                                dataKey="consumption"
+                                stroke="#10b981"
+                                fill="url(#consumptionGradient)"
+                                strokeWidth={2}
+                              />
+                              <Area
+                                type="monotone"
+                                dataKey="solar"
+                                stroke="#f59e0b"
+                                fill="url(#solarGradient)"
+                                strokeWidth={2}
+                              />
+                            </AreaChart>
+                          </ResponsiveContainer>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  <Card className={cn(panelCardClass, "rounded-2xl")}>
+                    <CardHeader>
+                      <CardTitle className={sectionTitleClass}>Billing & Payments</CardTitle>
+                      <CardDescription className={metaTextClass}>Quick summary and actions</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="grid grid-cols-2 gap-3 text-sm">
+                        <div className="rounded-lg border border-gray-100 p-3">
+                          <p className={metaTextClass}>Unpaid bills</p>
+                          <p className="text-lg font-semibold text-gray-900">{billingSummary.unpaidCount}</p>
+                          <p className={metaTextClass}>
+                            Next due: {billingSummary.nextDueDate ?? "—"}
+                          </p>
+                        </div>
+                        <div className="rounded-lg border border-gray-100 p-3">
+                          <p className={metaTextClass}>Payments</p>
+                          <p className="text-lg font-semibold text-gray-900">{paymentSummary.completedCount}</p>
+                          <p className={metaTextClass}>Pending: {paymentSummary.pendingCount}</p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-3">
+                        <div className="rounded-lg border border-gray-100 p-3">
+                          <p className={metaTextClass}>Payments over time</p>
+                          <div className="h-28 mt-2">
+                            {paymentsTrend.length === 0 ? (
+                              <div className="text-xs text-gray-500 py-6 text-center">No completed payments yet.</div>
+                            ) : (
+                              <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={paymentsTrend} margin={{ top: 6, right: 8, left: 0, bottom: 0 }}>
+                                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                  <XAxis dataKey="label" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
+                                  <YAxis tick={{ fontSize: 10 }} width={34} />
+                                  <Tooltip
+                                    contentStyle={{ fontSize: 12, borderRadius: 12 }}
+                                    formatter={(value: any) => [formatCurrency(Number(value || 0)), "Paid"]}
+                                  />
+                                  <Bar dataKey="amount" fill="#10b981" radius={[6, 6, 0, 0]} />
+                                </BarChart>
+                              </ResponsiveContainer>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="rounded-lg border border-gray-100 p-3">
+                          <p className={metaTextClass}>Bills trend</p>
+                          <div className="h-28 mt-2">
+                            {billsTrend.length === 0 ? (
+                              <div className="text-xs text-gray-500 py-6 text-center">No bills yet.</div>
+                            ) : (
+                              <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={billsTrend} margin={{ top: 6, right: 8, left: 0, bottom: 0 }}>
+                                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                  <XAxis dataKey="label" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
+                                  <YAxis tick={{ fontSize: 10 }} width={34} />
+                                  <Tooltip
+                                    contentStyle={{ fontSize: 12, borderRadius: 12 }}
+                                    formatter={(value: any) => [formatCurrency(Number(value || 0)), "Bill"]}
+                                  />
+                                  <Bar dataKey="amount" fill="#3b82f6" radius={[6, 6, 0, 0]} />
+                                </BarChart>
+                              </ResponsiveContainer>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex gap-2">
+                        <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white" onClick={() => setCurrentSection("bills-payment")}>
+                          Open Bills & Payment
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => setCurrentSection("subscription")}>
+                          Subscription
+                        </Button>
+                      </div>
+                      {billingSummary.overdueCount > 0 && (
+                        <div className="text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg p-3">
+                          {billingSummary.overdueCount} bill(s) appear overdue. Please review and pay to avoid service interruption.
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
+
+                <div className="grid gap-4 grid-cols-1 lg:grid-cols-3">
+                  <Card className={cn(panelCardClass, "rounded-2xl")}>
+                    <CardHeader className="flex flex-row items-start justify-between gap-3">
+                      <div>
+                        <CardTitle className={sectionTitleClass}>Notifications</CardTitle>
+                        <CardDescription className={metaTextClass}>
+                          {facilityUnreadCount > 0 ? `${facilityUnreadCount} unread` : "All caught up"}
+                        </CardDescription>
+                      </div>
+                      <Button variant="outline" size="sm" onClick={() => setCurrentSection("notifications")}>
+                        View
+                      </Button>
+                    </CardHeader>
+                    <CardContent>
+                      {facilityNotificationsLoading ? (
+                        <div className="text-sm text-gray-500 py-6">Loading…</div>
+                      ) : facilityNotifications.length === 0 ? (
+                        <div className="text-sm text-gray-500 py-6">No notifications yet.</div>
+                      ) : (
+                        <div className="space-y-3">
+                          {facilityNotifications.slice(0, 4).map((n) => (
+                            <div key={n.id} className="border border-gray-100 rounded-lg p-3">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="text-sm font-medium text-gray-900 truncate">{n.title}</p>
+                                  <p className="text-xs text-gray-500 line-clamp-2">{n.message}</p>
+                                </div>
+                                {!n.isRead && (
+                                  <span className="inline-flex h-2 w-2 rounded-full bg-green-600 mt-1 flex-shrink-0" />
+                                )}
+                              </div>
+                              <p className="text-[11px] text-gray-400 mt-2">
+                                {new Date(n.createdAt).toLocaleString()}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  <Card className={cn(panelCardClass, "lg:col-span-2 rounded-2xl")}>
+                    <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                      <div>
+                        <CardTitle className={sectionTitleClass}>Carbon Credits</CardTitle>
+                        <CardDescription className={metaTextClass}>
+                          Saved CO₂ and credits over recent periods
+                        </CardDescription>
+                      </div>
+                      <Button variant="outline" size="sm" onClick={() => setCurrentSection("carbon-credits")}>
+                        Open Carbon Credits
+                      </Button>
+                    </CardHeader>
+                    <CardContent className="pt-2">
+                      {creditsSummary.chart.length === 0 ? (
+                        <div className="text-sm text-gray-500 py-8 text-center">
+                          No carbon credit records yet.
+                        </div>
+                      ) : (
+                        <div className="grid gap-4 grid-cols-1 lg:grid-cols-3">
+                          <div className="lg:col-span-1 grid gap-3">
+                            <div className="rounded-lg border border-gray-100 p-3">
+                              <p className={metaTextClass}>Total credits</p>
+                              <p className="text-lg font-semibold text-gray-900">
+                                {creditsSummary.totalCredits.toFixed(3)}
+                              </p>
+                            </div>
+                            <div className="rounded-lg border border-gray-100 p-3">
+                              <p className={metaTextClass}>Total value</p>
+                              <p className="text-lg font-semibold text-gray-900">
+                                ${creditsSummary.totalValue.toFixed(2)}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="lg:col-span-2 h-56">
+                            <ResponsiveContainer width="100%" height="100%">
+                              <AreaChart data={creditsSummary.chart} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                                <defs>
+                                  <linearGradient id="creditsGradient" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.22} />
+                                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.05} />
+                                  </linearGradient>
+                                </defs>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                <XAxis dataKey="label" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
+                                <YAxis tick={{ fontSize: 11 }} width={36} />
+                                <Tooltip
+                                  contentStyle={{ fontSize: 12, borderRadius: 12 }}
+                                  formatter={(value: any) => [Number(value).toFixed(4), "Credits (tons)"]}
+                                />
+                                <Area type="monotone" dataKey="credits" stroke="#3b82f6" fill="url(#creditsGradient)" strokeWidth={2} />
+                              </AreaChart>
+                            </ResponsiveContainer>
+                          </div>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
+
+                <Card className={cn(panelCardClass, "rounded-2xl")}>
+                  <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div>
+                      <CardTitle className={sectionTitleClass}>Reports</CardTitle>
+                      <CardDescription className={metaTextClass}>
+                        Review facility performance and generated artifacts
+                      </CardDescription>
+                    </div>
+                    <Button variant="outline" size="sm" onClick={() => setCurrentSection("report")}>
+                      Open Report
+                    </Button>
+                  </CardHeader>
+                  <CardContent className="grid gap-3 grid-cols-1 md:grid-cols-3">
+                    <div className="rounded-lg border border-gray-100 p-3">
+                      <p className={metaTextClass}>Latest bill</p>
+                      <p className="text-sm font-semibold text-gray-900">
+                        {billingSummary.latestBillAmount != null ? formatCurrency(billingSummary.latestBillAmount) : "—"}
+                      </p>
+                      <p className={metaTextClass}>Bills: {billingSummary.totalBills}</p>
+                    </div>
+                    <div className="rounded-lg border border-gray-100 p-3">
+                      <p className={metaTextClass}>Efficiency score</p>
+                      <p className="text-sm font-semibold text-gray-900">{energyEfficiencyScore}%</p>
+                      <p className={metaTextClass}>Solar share: {metrics.solarPercentage.toFixed(1)}%</p>
+                    </div>
+                    <div className="rounded-lg border border-gray-100 p-3">
+                      <p className={metaTextClass}>Unread notifications</p>
+                      <p className="text-sm font-semibold text-gray-900">{facilityUnreadCount}</p>
+                      <p className={metaTextClass}>Payments: {paymentSummary.completedCount} completed</p>
+                    </div>
+                  </CardContent>
+                </Card>
+
               {/* Facility self-service widgets intentionally hidden for now */}
             </>)}
 

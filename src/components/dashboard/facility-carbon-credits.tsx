@@ -52,7 +52,8 @@ interface FacilityCarbonCreditsProps {
 }
 
 export function FacilityCarbonCredits({ facilityId }: FacilityCarbonCreditsProps) {
-  const [selectedDevice, setSelectedDevice] = useState<string>('')
+  // Radix SelectItem disallows empty string values; use 'all' sentinel.
+  const [selectedDevice, setSelectedDevice] = useState<string>('all')
   const [selectedPeriod, setSelectedPeriod] = useState<string>('monthly')
   const [isCalculatorOpen, setIsCalculatorOpen] = useState(false)
   const [startDate, setStartDate] = useState<string>('')
@@ -75,7 +76,7 @@ export function FacilityCarbonCredits({ facilityId }: FacilityCarbonCreditsProps
     queryFn: async (): Promise<CarbonCredit[]> => {
       const params = new URLSearchParams({
         facilityId,
-        ...(selectedDevice && { deviceId: selectedDevice }),
+        ...(selectedDevice && selectedDevice !== 'all' && { deviceId: selectedDevice }),
         ...(selectedPeriod && selectedPeriod !== 'all' && { period: selectedPeriod }),
         limit: '12'
       })
@@ -119,7 +120,7 @@ export function FacilityCarbonCredits({ facilityId }: FacilityCarbonCreditsProps
   }
 
   const handleCalculateCredits = () => {
-    if (!selectedDevice || !startDate || !endDate) {
+    if (!selectedDevice || selectedDevice === 'all' || !startDate || !endDate) {
       toast.error('Please select device and date range')
       return
     }
@@ -343,7 +344,7 @@ export function FacilityCarbonCredits({ facilityId }: FacilityCarbonCreditsProps
                 <SelectValue placeholder="All Devices" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All Devices</SelectItem>
+                <SelectItem value="all">All Devices</SelectItem>
                 {devices.map((device: any) => (
                   <SelectItem key={device.id} value={device.id}>
                     {device.name || device.serialNumber}
