@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -10,9 +10,26 @@ import { Loader2, ChevronDown, ChevronUp, Zap, Flame, Wind, Users } from "lucide
 import type { SectionScores } from "@/lib/intelligence/recommendations"
 import { cn } from "@/lib/utils"
 
+export type FourPointPersistedState = {
+  outageHours: string
+  batteryBackup: string
+  ledPercent: string
+  devicesOff: string
+  acType: string
+  insulation: string
+  staffTraining: string
+  monitoringAssigned: string
+  assessmentScore: number | null
+  openCard?: string | null
+  sectionScores?: SectionScores
+}
+
 interface FourPointAssessmentProps {
   onScoreChange?: (summary: { score: number | null; bmiPercent: number | null }) => void
   onSectionScoresChange?: (sections: SectionScores | null) => void
+  assessmentCycleId?: string
+  /** Restored from `/api/assessment-cycles/.../energy` operations_data */
+  initialOperationsData?: FourPointPersistedState | null
 }
 
 function scoreReliability(outageHours: string, batteryBackup: string) {
@@ -55,7 +72,12 @@ function scoreBehavior(staffTraining: string, monitoringAssigned: string) {
   return s + m
 }
 
-export function FourPointAssessment({ onScoreChange, onSectionScoresChange }: FourPointAssessmentProps) {
+export function FourPointAssessment({
+  onScoreChange,
+  onSectionScoresChange,
+  assessmentCycleId,
+  initialOperationsData,
+}: FourPointAssessmentProps) {
   const [outageHours, setOutageHours] = useState<string>("")
   const [batteryBackup, setBatteryBackup] = useState<string>("")
   const [ledPercent, setLedPercent] = useState<string>("")
@@ -70,6 +92,35 @@ export function FourPointAssessment({ onScoreChange, onSectionScoresChange }: Fo
   const [showScoreDialog, setShowScoreDialog] = useState(false)
 
   const [openCard, setOpenCard] = useState<string | null>("reliability")
+
+  const opsHydratedRef = useRef(false)
+  useEffect(() => {
+    opsHydratedRef.current = false
+  }, [assessmentCycleId])
+
+  useEffect(() => {
+    if (!initialOperationsData || opsHydratedRef.current) return
+    const o = initialOperationsData
+    if (typeof o.outageHours === "string") setOutageHours(o.outageHours)
+    if (typeof o.batteryBackup === "string") setBatteryBackup(o.batteryBackup)
+    if (typeof o.ledPercent === "string") setLedPercent(o.ledPercent)
+    if (typeof o.devicesOff === "string") setDevicesOff(o.devicesOff)
+    if (typeof o.acType === "string") setAcType(o.acType)
+    if (typeof o.insulation === "string") setInsulation(o.insulation)
+    if (typeof o.staffTraining === "string") setStaffTraining(o.staffTraining)
+    if (typeof o.monitoringAssigned === "string") setMonitoringAssigned(o.monitoringAssigned)
+    if (typeof o.assessmentScore === "number" || o.assessmentScore === null) {
+      setAssessmentScore(o.assessmentScore ?? null)
+    }
+    if (typeof o.openCard === "string") setOpenCard(o.openCard)
+    opsHydratedRef.current = true
+    if (typeof o.assessmentScore === "number") {
+      onScoreChange?.({
+        score: o.assessmentScore,
+        bmiPercent: Math.round((o.assessmentScore / 40) * 100),
+      })
+    }
+  }, [initialOperationsData, onScoreChange])
 
   const sectionScoresLive = useMemo(
     () => ({
@@ -142,6 +193,48 @@ export function FourPointAssessment({ onScoreChange, onSectionScoresChange }: Fo
     ]
     return [...entries].sort((a, b) => a.v - b.v).slice(0, 3)
   }, [sectionScoresLive])
+
+  useEffect(() => {
+    if (!assessmentCycleId) return
+    const t = window.setTimeout(async () => {
+      try {
+        const operationsData: FourPointPersistedState = {
+          outageHours,
+          batteryBackup,
+          ledPercent,
+          devicesOff,
+          acType,
+          insulation,
+          staffTraining,
+          monitoringAssigned,
+          assessmentScore,
+          openCard,
+          sectionScores: sectionScoresLive,
+        }
+        await fetch(`/api/assessment-cycles/${assessmentCycleId}/energy`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ operationsData }),
+        })
+      } catch {
+        // ignore
+      }
+    }, 1000)
+    return () => window.clearTimeout(t)
+  }, [
+    assessmentCycleId,
+    outageHours,
+    batteryBackup,
+    ledPercent,
+    devicesOff,
+    acType,
+    insulation,
+    staffTraining,
+    monitoringAssigned,
+    assessmentScore,
+    openCard,
+    sectionScoresLive,
+  ])
 
   const card = (
     id: string,

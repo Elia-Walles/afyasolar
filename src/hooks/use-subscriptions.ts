@@ -1,4 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { notifyError, notifySuccess } from "@/lib/toast-feedback"
+import { getErrorMessage } from "@/lib/get-error-message"
 
 interface Subscription {
   id: string
@@ -129,6 +131,10 @@ export function useSubscribe() {
       return subscriptionResult
     },
     onSuccess: (_, variables) => {
+      notifySuccess(
+        "Subscription updated",
+        variables.serviceName === "afya-solar" ? "Your Afya Solar subscription is active." : "Your subscription was saved."
+      )
       // Invalidate all subscription-related queries
       queryClient.invalidateQueries({ queryKey: ["subscriptions"], exact: false })
       queryClient.invalidateQueries({ queryKey: ["subscription-check"], exact: false })
@@ -137,6 +143,9 @@ export function useSubscribe() {
       queryClient.refetchQueries({ queryKey: ["subscriptions"], exact: false })
       queryClient.refetchQueries({ queryKey: ["subscription-check"], exact: false })
       queryClient.refetchQueries({ queryKey: ["afya-solar-subscribers"], exact: false })
+    },
+    onError: (e) => {
+      notifyError("Subscription failed", getErrorMessage(e))
     },
   })
 }

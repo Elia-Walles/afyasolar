@@ -4,6 +4,9 @@ import { SessionProvider } from 'next-auth/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ThemeProvider } from '@/components/theme-provider'
 import { useState } from 'react'
+import { GlobalAsyncStatus } from '@/components/global-async-status'
+import { NavigationProgress } from '@/components/navigation-progress'
+import { ResponsiveAppToaster } from '@/components/responsive-app-toaster'
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
@@ -15,6 +18,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
             refetchOnWindowFocus: false,
             retry: 1,
           },
+          mutations: {
+            retry: 0,
+          },
         },
       })
   )
@@ -23,7 +29,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <SessionProvider>
       <QueryClientProvider client={queryClient}>
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
+          <NavigationProgress />
+          <GlobalAsyncStatus />
           {children}
+          <ResponsiveAppToaster />
         </ThemeProvider>
       </QueryClientProvider>
     </SessionProvider>

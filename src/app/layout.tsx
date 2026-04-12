@@ -3,7 +3,6 @@ import type { Metadata, Viewport } from "next"
 import { GeistSans } from "geist/font/sans"
 import { GeistMono } from "geist/font/mono"
 import { Analytics } from "@vercel/analytics/next"
-import { Toaster } from "sonner"
 import { Providers } from "@/components/providers"
 import { InstallPrompt } from "@/components/pwa/install-prompt"
 import { SessionGuard } from "@/components/auth/session-guard"
@@ -53,14 +52,16 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`font-sans ${GeistSans.variable} ${GeistMono.variable} antialiased`} suppressHydrationWarning>
+      <body
+        className={`font-sans ${GeistSans.variable} ${GeistMono.variable} min-h-dvh overflow-x-hidden antialiased touch-manipulation`}
+        suppressHydrationWarning
+      >
         <Providers>
           <SessionGuard>
             {children}
           </SessionGuard>
           <InstallPrompt />
           <PushNotificationPrompt />
-          <Toaster position="top-right" richColors />
         </Providers>
         <Analytics />
       </body>

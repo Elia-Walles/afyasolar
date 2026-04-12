@@ -22,20 +22,23 @@ import {
   Mail,
   MapPin,
   Calendar,
-  Activity
+  Activity,
+  CloudSun,
 } from 'lucide-react'
 import { useFacility } from '@/hooks/use-facilities'
 import { useLiveEnergyData } from '@/hooks/use-energy-data'
 import { FacilityDashboardContent } from '@/components/dashboard/facility-dashboard-content'
+import { FacilityIntelligenceAdminReview } from '@/components/admin/facility-intelligence-admin-review'
 import { formatCurrency } from '@/lib/utils'
 
-type NavSection = 'overview' | 'devices' | 'energy' | 'energy-efficiency' | 'bills-payment' | 'notifications' | 'report' | 'carbon-credits' | 'subscription' | 'settings'
+type NavSection = 'overview' | 'devices' | 'energy' | 'energy-efficiency' | 'climate-resilience' | 'bills-payment' | 'notifications' | 'report' | 'carbon-credits' | 'subscription' | 'settings'
 
 const navItems: { id: NavSection; label: string; icon: React.ElementType }[] = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
   { id: 'devices', label: 'Devices', icon: Plug },
   { id: 'energy', label: 'Energy', icon: Zap },
   { id: 'energy-efficiency', label: 'Energy Efficiency', icon: DollarSign },
+  { id: 'climate-resilience', label: 'Climate Resilience', icon: CloudSun },
   { id: 'bills-payment', label: 'Bills & Payment', icon: DollarSign },
   { id: 'notifications', label: 'Notifications & Alerts', icon: Bell },
   { id: 'report', label: 'Report', icon: BarChart3 },
@@ -58,7 +61,7 @@ export default function AdminFacilityDashboard() {
 
   useEffect(() => {
     const section = searchParams.get('section') as NavSection
-    if (section && ['overview', 'devices', 'energy', 'energy-efficiency', 'bills-payment', 'contract-details', 'notifications', 'report', 'settings'].includes(section)) {
+    if (section && ['overview', 'devices', 'energy', 'energy-efficiency', 'climate-resilience', 'bills-payment', 'contract-details', 'notifications', 'report', 'carbon-credits', 'subscription', 'settings'].includes(section)) {
       setActiveSection(section as NavSection)
     }
   }, [searchParams])
@@ -220,8 +223,9 @@ export default function AdminFacilityDashboard() {
         </aside>
 
         {/* Content Area */}
-        <main className="flex-1 p-6">
-          <div className="max-w-7xl mx-auto">
+        <main className="flex-1 p-4 sm:p-6">
+          <div className="max-w-7xl mx-auto space-y-6">
+            <FacilityIntelligenceAdminReview facilityId={facilityId} />
             <FacilityDashboardContent 
               facility={facility} 
               liveData={liveData} 

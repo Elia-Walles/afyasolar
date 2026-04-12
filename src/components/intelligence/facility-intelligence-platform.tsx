@@ -21,6 +21,8 @@ import { FacilityMeterEfficiencyDashboard } from "@/components/efficiency/facili
 import { FacilityClimateResilienceDashboard } from "@/components/efficiency/facility-climate-resilience-dashboard"
 import { ClimateResilienceAssessment } from "@/components/climate/climate-resilience-assessment"
 import { buildIntelligenceRecommendations, type SectionScores } from "@/lib/intelligence/recommendations"
+import { getErrorMessage } from "@/lib/get-error-message"
+import { notifyError, notifySuccess } from "@/lib/toast-feedback"
 import { formatCurrency } from "@/lib/utils"
 import {
   Activity,
@@ -38,10 +40,14 @@ const tabTriggerClass =
 
 type StepStatus = "complete" | "in_progress" | "blocked"
 
+export type IntelligencePlatformScope = "full" | "energy" | "climate"
+
 interface FacilityIntelligencePlatformProps {
   facilityId?: string
   facilityName?: string
   packages?: RecommendedPackageInput[]
+  /** full = legacy combined workflow; energy = devices, operations, charts (no climate assess UI); climate = resilience assessment + dashboards */
+  platformScope?: IntelligencePlatformScope
   sizingSummary: SizingSummary | null
   meuSummary: MeuSummary | null
   bmiSummary: { score: number | null; bmiPercent: number | null } | null
@@ -56,6 +62,7 @@ export function FacilityIntelligencePlatform({
   facilityId,
   facilityName,
   packages,
+  platformScope = "full",
   sizingSummary,
   meuSummary,
   bmiSummary,
@@ -65,6 +72,9 @@ export function FacilityIntelligencePlatform({
   onBmiSummaryChange,
   onSectionScoresChange,
 }: FacilityIntelligencePlatformProps) {
+  const isEnergyOnly = platformScope === "energy"
+  const isClimateOnly = platformScope === "climate"
+
   const [mainTab, setMainTab] = useState<IntelTab>("overview")
   const [assessSub, setAssessSub] = useState<"devices" | "operations" | "climate">("devices")
   const [facilityCtx, setFacilityCtx] = useState<FacilityContextSnapshot | null>(null)
@@ -84,6 +94,11 @@ export function FacilityIntelligencePlatform({
   const [persistedTasks, setPersistedTasks] = useState<
     { id: string; recommendationId: string; ownerName: string | null; dueDate: string | null; status: string }[]
   >([])
+  const [energySnapshot, setEnergySnapshot] = useState<{
+    sizingData: unknown | null
+    operationsData: unknown | null
+    bmiTrendJson: unknown | null
+  } | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -148,6 +163,68 @@ export function FacilityIntelligencePlatform({
     }
   }, [facilityId])
 
+  // Load persisted energy-efficiency state (devices/loads + four-point BMI) for this assessment cycle
+  useEffect(() => {
+    let cancelled = false
+    if (!assessmentCycleId) {
+      setEnergySnapshot(null)
+      return
+    }
+    ;(async () => {
+      try {
+        const res = await fetch(`/api/assessment-cycles/${assessmentCycleId}/energy`, { cache: "no-store" })
+        const j = await res.json()
+        if (cancelled || !res.ok) return
+        setEnergySnapshot({
+          sizingData: j.sizingData ?? null,
+          operationsData: j.operationsData ?? null,
+          bmiTrendJson: j.bmiTrendJson ?? null,
+        })
+        if (Array.isArray(j.bmiTrendJson) && j.bmiTrendJson.length > 0) {
+          setBmiTrend(j.bmiTrendJson as { date: string; value: number }[])
+        } else if (facilityId && typeof window !== "undefined") {
+          try {
+            const key = `afyasolar:bmiTrend:${facilityId}`
+            const prevRaw = window.localStorage.getItem(key)
+            const prev: { date: string; value: number }[] = prevRaw ? JSON.parse(prevRaw) : []
+            if (Array.isArray(prev) && prev.length > 0) setBmiTrend(prev.slice(-12))
+          } catch {
+            // ignore
+          }
+        }
+      } catch {
+        if (!cancelled) setEnergySnapshot(null)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [assessmentCycleId, facilityId])
+
+  useEffect(() => {
+    if (!assessmentCycleId || bmiTrend.length === 0) return
+    const t = window.setTimeout(async () => {
+      try {
+        await fetch(`/api/assessment-cycles/${assessmentCycleId}/energy`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ bmiTrendJson: bmiTrend }),
+        })
+      } catch {
+        // ignore
+      }
+    }, 1200)
+    return () => window.clearTimeout(t)
+  }, [bmiTrend, assessmentCycleId])
+
+  useEffect(() => {
+    if (isEnergyOnly && assessSub === "climate") setAssessSub("devices")
+  }, [isEnergyOnly, assessSub])
+
+  useEffect(() => {
+    if (isClimateOnly) setAssessSub("climate")
+  }, [isClimateOnly])
+
   useEffect(() => {
     let cancelled = false
     if (!assessmentCycleId) {
@@ -182,30 +259,66 @@ export function FacilityIntelligencePlatform({
     const devicesDone = Boolean(meuSummary && meuSummary.totalDailyLoad > 0)
     const operationsDone = Boolean(bmiSummary != null && bmiSummary.score !== null)
     const climateDone = climateResilienceScore !== null
+
+    if (isClimateOnly) {
+      const assessDone = climateDone
+      const analyzeReady = climateDone
+      return {
+        devicesDone,
+        operationsDone,
+        climateDone,
+        assessDone,
+        analyzeReady,
+        actionReady: analyzeReady,
+        reportsReady: analyzeReady,
+      }
+    }
+
+    if (isEnergyOnly) {
+      const assessDone = devicesDone && operationsDone
+      const analyzeReady = devicesDone || operationsDone
+      return {
+        devicesDone,
+        operationsDone,
+        climateDone,
+        assessDone,
+        analyzeReady,
+        actionReady: analyzeReady,
+        reportsReady: analyzeReady,
+      }
+    }
+
     const assessDone = devicesDone && operationsDone && climateDone
     const analyzeReady = devicesDone || operationsDone || climateDone
-    const actionReady = analyzeReady
-    const reportsReady = analyzeReady
-
     return {
       devicesDone,
       operationsDone,
       climateDone,
       assessDone,
       analyzeReady,
-      actionReady,
-      reportsReady,
+      actionReady: analyzeReady,
+      reportsReady: analyzeReady,
     }
-  }, [meuSummary, bmiSummary, climateResilienceScore])
+  }, [meuSummary, bmiSummary, climateResilienceScore, isClimateOnly, isEnergyOnly])
 
   const assessProgress = useMemo(() => {
+    if (isClimateOnly) {
+      return climateResilienceScore !== null ? 100 : 0
+    }
+    if (isEnergyOnly) {
+      let done = 0
+      const total = 2
+      if (meuSummary && meuSummary.totalDailyLoad > 0) done++
+      if (bmiSummary != null && bmiSummary.score !== null) done++
+      return Math.round((done / total) * 100)
+    }
     let done = 0
     const total = 3
     if (meuSummary && meuSummary.totalDailyLoad > 0) done++
     if (bmiSummary != null && bmiSummary.score !== null) done++
     if (climateResilienceScore !== null) done++
     return Math.round((done / total) * 100)
-  }, [meuSummary, bmiSummary, climateResilienceScore])
+  }, [meuSummary, bmiSummary, climateResilienceScore, isClimateOnly, isEnergyOnly])
 
   const efficiencyScore = bmiSummary?.bmiPercent ?? null
 
@@ -242,10 +355,18 @@ export function FacilityIntelligencePlatform({
   }, [facilityId])
 
   const nextRecommendedStep = useMemo((): IntelTab => {
+    if (isClimateOnly) {
+      if (climateResilienceScore === null) return "assess"
+      return "analyze"
+    }
+    if (isEnergyOnly) {
+      if (!completion.devicesDone || !completion.operationsDone) return "assess"
+      return "analyze"
+    }
     if (!completion.devicesDone || !completion.operationsDone || !completion.climateDone) return "assess"
     if (completion.analyzeReady) return "analyze"
     return "overview"
-  }, [completion])
+  }, [completion, climateResilienceScore, isClimateOnly, isEnergyOnly])
 
   const stepStatus = useMemo(() => {
     const map: Record<IntelTab, StepStatus> = {
@@ -263,7 +384,7 @@ export function FacilityIntelligencePlatform({
     if (tab === "analyze" || tab === "action" || tab === "reports") {
       if (!completion.analyzeReady) {
         setMainTab("assess")
-        setAssessSub("devices")
+        setAssessSub(isClimateOnly ? "climate" : "devices")
         return
       }
     }
@@ -319,11 +440,18 @@ export function FacilityIntelligencePlatform({
           <div>
             <h2 className="text-lg font-semibold text-emerald-950 flex items-center gap-2">
               <Sparkles className="h-5 w-5 text-emerald-600" />
-              AfyaSolar Intelligence
+              {isClimateOnly
+                ? "Climate resilience & adaptation"
+                : isEnergyOnly
+                  ? "Energy efficiency & planning"
+                  : "AfyaSolar Intelligence"}
             </h2>
             <p className="text-xs sm:text-sm text-emerald-900/80 max-w-2xl">
-              Guided assessment, analysis, and actions in one workflow. Energy, meter efficiency, and climate resilience
-              scoring are integrated below.
+              {isClimateOnly
+                ? "Guided climate readiness (CRiPHC-aligned), hazard context, adaptation tracking, and saved risk drivers for your facility."
+                : isEnergyOnly
+                  ? "Guided devices & loads sizing, operational efficiency (BMI), and analysis charts—without mixing in the climate questionnaire here."
+                  : "Guided assessment, analysis, and actions in one workflow. Energy, meter efficiency, and climate resilience scoring are integrated below."}
             </p>
           </div>
           {facilityName && (
@@ -358,7 +486,11 @@ export function FacilityIntelligencePlatform({
                 {nextRecommendedStep === "assess" && (
                   <span className="text-emerald-900/70">
                     {" "}
-                    — complete Devices & loads, Operational efficiency, and Climate readiness.
+                    {isClimateOnly
+                      ? "— complete the climate readiness questionnaire."
+                      : isEnergyOnly
+                        ? "— complete Devices & loads and Operational efficiency."
+                        : "— complete Devices & loads, Operational efficiency, and Climate readiness."}
                   </span>
                 )}
               </p>
@@ -379,60 +511,112 @@ export function FacilityIntelligencePlatform({
         </div>
 
         <TabsContent value="overview" className="space-y-4 mt-4">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <Card className="border-emerald-100">
-              <CardHeader className="pb-2">
-                <CardDescription className="text-xs">Daily demand (est.)</CardDescription>
-                <CardTitle className="text-2xl text-emerald-900">
-                  {sizingSummary ? `${sizingSummary.totalDailyLoad.toFixed(1)} kWh/d` : "—"}
-                </CardTitle>
-              </CardHeader>
-            </Card>
-            <Card className="border-emerald-100">
-              <CardHeader className="pb-2">
-                <CardDescription className="text-xs">Indicative solar size</CardDescription>
-                <CardTitle className="text-2xl text-emerald-900">
-                  {sizingSummary ? `${sizingSummary.solarArraySize.toFixed(1)} kW` : "—"}
-                </CardTitle>
-              </CardHeader>
-            </Card>
-            <Card className="border-emerald-100">
-              <CardHeader className="pb-2">
-                <CardDescription className="text-xs">Annual savings (slider model)</CardDescription>
-                <CardTitle className="text-2xl text-emerald-900">
-                  {sizingSummary ? formatCurrency(sizingSummary.annualSavings) : "—"}
-                </CardTitle>
-              </CardHeader>
-            </Card>
-            <Card className="border-emerald-100">
-              <CardHeader className="pb-2">
-                <CardDescription className="text-xs">Operational score (BMI)</CardDescription>
-                <CardTitle className="text-2xl text-emerald-900">
-                  {efficiencyScore !== null ? `${efficiencyScore}%` : "—"}
-                </CardTitle>
-              </CardHeader>
-            </Card>
-            <Card className="border-emerald-100">
-              <CardHeader className="pb-2">
-                <CardDescription className="text-xs">Climate resilience score</CardDescription>
-                <CardTitle className="text-2xl text-emerald-900">
-                  {climateResilienceScore !== null ? climateResilienceScore : "—"}
-                </CardTitle>
-                <p className="text-[11px] text-muted-foreground">
-                  {facilityId
-                    ? "From hazard exposure + adaptation progress (demo-seeded when DB empty)."
-                    : "Sign in as a facility to load climate data."}
-                </p>
-              </CardHeader>
-            </Card>
-            <Card className="border-emerald-100">
-              <CardHeader className="pb-2">
-                <CardDescription className="text-xs">Assessment progress</CardDescription>
-                <CardTitle className="text-2xl text-emerald-900">{assessProgress}%</CardTitle>
-                <Progress value={assessProgress} className="h-2 mt-2 bg-emerald-100" />
-              </CardHeader>
-            </Card>
-          </div>
+          {isClimateOnly ? (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <Card className="border-emerald-100">
+                <CardHeader className="pb-2">
+                  <CardDescription className="text-xs">Resilience capacity score (RCS)</CardDescription>
+                  <CardTitle className="text-2xl text-emerald-900">
+                    {persistedClimateScore?.rcs ?? (climateResilienceScore !== null ? climateResilienceScore : "—")}
+                  </CardTitle>
+                </CardHeader>
+              </Card>
+              <Card className="border-emerald-100">
+                <CardHeader className="pb-2">
+                  <CardDescription className="text-xs">Tier &amp; attention</CardDescription>
+                  <CardTitle className="text-2xl text-emerald-900">
+                    {persistedClimateScore ? `Tier ${persistedClimateScore.tier}` : "—"}
+                  </CardTitle>
+                  {persistedClimateScore?.criticalAttention && (
+                    <p className="text-[11px] text-amber-800 font-medium">Critical attention</p>
+                  )}
+                </CardHeader>
+              </Card>
+              <Card className="border-emerald-100">
+                <CardHeader className="pb-2">
+                  <CardDescription className="text-xs">Top risk drivers (saved)</CardDescription>
+                  <CardTitle className="text-2xl text-emerald-900">{persistedTopRisks.length}</CardTitle>
+                </CardHeader>
+              </Card>
+              <Card className="border-emerald-100">
+                <CardHeader className="pb-2">
+                  <CardDescription className="text-xs">Follow-up tasks (saved)</CardDescription>
+                  <CardTitle className="text-2xl text-emerald-900">{persistedTasks.length}</CardTitle>
+                </CardHeader>
+              </Card>
+              <Card className="border-emerald-100">
+                <CardHeader className="pb-2">
+                  <CardDescription className="text-xs">Assessment progress</CardDescription>
+                  <CardTitle className="text-2xl text-emerald-900">{assessProgress}%</CardTitle>
+                  <Progress value={assessProgress} className="h-2 mt-2 bg-emerald-100" />
+                </CardHeader>
+              </Card>
+              <Card className="border-emerald-100">
+                <CardHeader className="pb-2">
+                  <CardDescription className="text-xs">Facility</CardDescription>
+                  <CardTitle className="text-lg text-emerald-900 line-clamp-2">{facilityName ?? facilityId ?? "—"}</CardTitle>
+                  <p className="text-[11px] text-muted-foreground">Cycle auto-saved to your assessment record.</p>
+                </CardHeader>
+              </Card>
+            </div>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <Card className="border-emerald-100">
+                <CardHeader className="pb-2">
+                  <CardDescription className="text-xs">Daily demand (est.)</CardDescription>
+                  <CardTitle className="text-2xl text-emerald-900">
+                    {sizingSummary ? `${sizingSummary.totalDailyLoad.toFixed(1)} kWh/d` : "—"}
+                  </CardTitle>
+                </CardHeader>
+              </Card>
+              <Card className="border-emerald-100">
+                <CardHeader className="pb-2">
+                  <CardDescription className="text-xs">Indicative solar size</CardDescription>
+                  <CardTitle className="text-2xl text-emerald-900">
+                    {sizingSummary ? `${sizingSummary.solarArraySize.toFixed(1)} kW` : "—"}
+                  </CardTitle>
+                </CardHeader>
+              </Card>
+              <Card className="border-emerald-100">
+                <CardHeader className="pb-2">
+                  <CardDescription className="text-xs">Annual savings (slider model)</CardDescription>
+                  <CardTitle className="text-2xl text-emerald-900">
+                    {sizingSummary ? formatCurrency(sizingSummary.annualSavings) : "—"}
+                  </CardTitle>
+                </CardHeader>
+              </Card>
+              <Card className="border-emerald-100">
+                <CardHeader className="pb-2">
+                  <CardDescription className="text-xs">Operational score (BMI)</CardDescription>
+                  <CardTitle className="text-2xl text-emerald-900">
+                    {efficiencyScore !== null ? `${efficiencyScore}%` : "—"}
+                  </CardTitle>
+                </CardHeader>
+              </Card>
+              {!isEnergyOnly && (
+                <Card className="border-emerald-100">
+                  <CardHeader className="pb-2">
+                    <CardDescription className="text-xs">Climate resilience score</CardDescription>
+                    <CardTitle className="text-2xl text-emerald-900">
+                      {climateResilienceScore !== null ? climateResilienceScore : "—"}
+                    </CardTitle>
+                    <p className="text-[11px] text-muted-foreground">
+                      {facilityId
+                        ? "From hazard exposure + adaptation progress (demo-seeded when DB empty)."
+                        : "Sign in as a facility to load climate data."}
+                    </p>
+                  </CardHeader>
+                </Card>
+              )}
+              <Card className="border-emerald-100">
+                <CardHeader className="pb-2">
+                  <CardDescription className="text-xs">Assessment progress</CardDescription>
+                  <CardTitle className="text-2xl text-emerald-900">{assessProgress}%</CardTitle>
+                  <Progress value={assessProgress} className="h-2 mt-2 bg-emerald-100" />
+                </CardHeader>
+              </Card>
+            </div>
+          )}
 
           <div className="grid gap-4 lg:grid-cols-2">
             <Card className="border-emerald-100">
@@ -465,17 +649,49 @@ export function FacilityIntelligencePlatform({
             </Card>
             <Card className="border-emerald-100">
               <CardHeader>
-                <CardTitle className="text-sm">Energy–resilience snapshot</CardTitle>
+                <CardTitle className="text-sm">
+                  {isClimateOnly
+                    ? "Climate readiness snapshot"
+                    : isEnergyOnly
+                      ? "Energy snapshot"
+                      : "Energy–resilience snapshot"}
+                </CardTitle>
                 <CardDescription className="text-xs">
-                  BMI {efficiencyScore !== null ? `${efficiencyScore}%` : "—"} · Resilience{" "}
-                  {climateResilienceScore !== null ? climateResilienceScore : "—"}
+                  {isClimateOnly ? (
+                    <>
+                      RCS{" "}
+                      {persistedClimateScore?.rcs ?? (climateResilienceScore !== null ? climateResilienceScore : "—")} ·
+                      Tier {persistedClimateScore ? persistedClimateScore.tier : "—"}
+                    </>
+                  ) : isEnergyOnly ? (
+                    <>BMI {efficiencyScore !== null ? `${efficiencyScore}%` : "—"} (operational efficiency)</>
+                  ) : (
+                    <>
+                      BMI {efficiencyScore !== null ? `${efficiencyScore}%` : "—"} · Resilience{" "}
+                      {climateResilienceScore !== null ? climateResilienceScore : "—"}
+                    </>
+                  )}
                 </CardDescription>
               </CardHeader>
               <CardContent>
                 <p className="text-xs text-muted-foreground">
-                  Use <span className="font-medium text-emerald-900">Energy Efficiency</span> for meter-based yield vs
-                  expected, and <span className="font-medium text-emerald-900">Climate readiness</span> for hazards and
-                  adaptation tracking.
+                  {isClimateOnly ? (
+                    <>
+                      Charts in <span className="font-medium text-emerald-900">Analyze</span>; saved drivers and tasks in{" "}
+                      <span className="font-medium text-emerald-900">Reports &amp; portfolio</span>.
+                    </>
+                  ) : isEnergyOnly ? (
+                    <>
+                      Use the <span className="font-medium text-emerald-900">Climate resilience</span> sidebar entry for
+                      hazards, adaptation tracking, and saved climate risk drivers.
+                    </>
+                  ) : (
+                    <>
+                      Use <span className="font-medium text-emerald-900">Energy Efficiency</span> for meter-based yield vs
+                      expected, and <span className="font-medium text-emerald-900">Climate resilience</span> for hazards
+                      and adaptation tracking.
+                    </>
+                  )}
                 </p>
               </CardContent>
             </Card>
@@ -494,36 +710,16 @@ export function FacilityIntelligencePlatform({
         <TabsContent value="assess" className="space-y-4 mt-4">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-emerald-900/90">
-              Step through devices, operational practice, then climate readiness.
+              {isClimateOnly
+                ? "Complete the guided climate readiness questionnaire; scores and risk drivers save to your assessment cycle."
+                : isEnergyOnly
+                  ? "Start with devices & loads, then operational efficiency (BMI). Use Climate resilience in the sidebar for hazards and adaptation."
+                  : "Step through devices, operational practice, then climate readiness."}
             </p>
             <Progress value={assessProgress} className="h-2 w-full sm:w-48 bg-emerald-100" />
           </div>
-          <Tabs value={assessSub} onValueChange={(v) => setAssessSub(v as typeof assessSub)}>
-            <TabsList className="bg-emerald-50/80 border border-emerald-100 rounded-lg p-1 w-full sm:w-auto">
-              <TabsTrigger value="devices" className={tabTriggerClass}>
-                Devices &amp; loads
-              </TabsTrigger>
-              <TabsTrigger value="operations" className={tabTriggerClass}>
-                Operational efficiency
-              </TabsTrigger>
-              <TabsTrigger value="climate" className={tabTriggerClass}>
-                Climate readiness
-              </TabsTrigger>
-            </TabsList>
-            <TabsContent value="devices" className="mt-4">
-              <AfyaSolarSizingTool
-                packages={packages}
-                onSizingSummaryChange={onSizingSummaryChange}
-                onMeuSummaryChange={onMeuSummaryChange}
-                onFacilityContextChange={setFacilityCtx}
-                facilityId={facilityId}
-                facilityName={facilityName}
-              />
-            </TabsContent>
-            <TabsContent value="operations" className="mt-4">
-              <FourPointAssessment onScoreChange={onBmiSummaryChange} onSectionScoresChange={onSectionScoresChange} />
-            </TabsContent>
-            <TabsContent value="climate" className="mt-4">
+          {isClimateOnly ? (
+            <div className="mt-4 space-y-4">
               {facilityId ? (
                 <div className="space-y-4">
                   <ClimateResilienceAssessment
@@ -533,10 +729,9 @@ export function FacilityIntelligencePlatform({
                   />
                   <Card className="border-emerald-100">
                     <CardHeader className="pb-2">
-                      <CardTitle className="text-sm">Existing climate dashboard (seeded)</CardTitle>
+                      <CardTitle className="text-sm">Climate dashboard (facility profile)</CardTitle>
                       <CardDescription className="text-xs">
-                        Hazard radar + adaptation tracker based on seeded profile. The guided assessment above will
-                        become the primary input source as we connect persistence.
+                        Hazard radar and adaptation tracker; complements the guided assessment above.
                       </CardDescription>
                     </CardHeader>
                     <CardContent>
@@ -547,8 +742,75 @@ export function FacilityIntelligencePlatform({
               ) : (
                 <FacilityClimateResilienceDashboard facilityId={facilityId} />
               )}
-            </TabsContent>
-          </Tabs>
+            </div>
+          ) : (
+            <Tabs value={assessSub} onValueChange={(v) => setAssessSub(v as typeof assessSub)}>
+              <TabsList className="bg-emerald-50/80 border border-emerald-100 rounded-lg p-1 w-full sm:w-auto">
+                <TabsTrigger value="devices" className={tabTriggerClass}>
+                  Devices &amp; loads
+                </TabsTrigger>
+                <TabsTrigger value="operations" className={tabTriggerClass}>
+                  Operational efficiency
+                </TabsTrigger>
+                {!isEnergyOnly && (
+                  <TabsTrigger value="climate" className={tabTriggerClass}>
+                    Climate readiness
+                  </TabsTrigger>
+                )}
+              </TabsList>
+              <TabsContent value="devices" className="mt-4">
+                <AfyaSolarSizingTool
+                  key={assessmentCycleId ?? "no-cycle"}
+                  packages={packages}
+                  onSizingSummaryChange={onSizingSummaryChange}
+                  onMeuSummaryChange={onMeuSummaryChange}
+                  onFacilityContextChange={setFacilityCtx}
+                  facilityId={facilityId}
+                  facilityName={facilityName}
+                  assessmentCycleId={assessmentCycleId ?? undefined}
+                  persistedSizingData={energySnapshot?.sizingData}
+                />
+              </TabsContent>
+              <TabsContent value="operations" className="mt-4">
+                <FourPointAssessment
+                  key={assessmentCycleId ?? "no-cycle"}
+                  onScoreChange={onBmiSummaryChange}
+                  onSectionScoresChange={onSectionScoresChange}
+                  assessmentCycleId={assessmentCycleId ?? undefined}
+                  initialOperationsData={
+                    energySnapshot?.operationsData && typeof energySnapshot.operationsData === "object"
+                      ? (energySnapshot.operationsData as any)
+                      : null
+                  }
+                />
+              </TabsContent>
+              <TabsContent value="climate" className="mt-4">
+                {facilityId ? (
+                  <div className="space-y-4">
+                    <ClimateResilienceAssessment
+                      facilityId={facilityId}
+                      assessmentCycleId={assessmentCycleId ?? undefined}
+                      onCapacityScoreChange={(score) => setClimateResilienceScore(score)}
+                    />
+                    <Card className="border-emerald-100">
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-sm">Existing climate dashboard (seeded)</CardTitle>
+                        <CardDescription className="text-xs">
+                          Hazard radar + adaptation tracker based on seeded profile. The guided assessment above will
+                          become the primary input source as we connect persistence.
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <FacilityClimateResilienceDashboard facilityId={facilityId} />
+                      </CardContent>
+                    </Card>
+                  </div>
+                ) : (
+                  <FacilityClimateResilienceDashboard facilityId={facilityId} />
+                )}
+              </TabsContent>
+            </Tabs>
+          )}
         </TabsContent>
 
         <TabsContent value="analyze" className="mt-4">
@@ -561,18 +823,22 @@ export function FacilityIntelligencePlatform({
               recommendations={recommendations}
               bmiTrend={bmiTrend}
             />
-            <FacilityMeterEfficiencyDashboard facilityId={facilityId} preferMock={false} />
-            <Card className="border-emerald-100">
-              <CardHeader>
-                <CardTitle className="text-sm">Climate resilience &amp; adaptation</CardTitle>
-                <CardDescription className="text-xs">
-                  Hazard exposure, resilience trend, and adaptation plan tracking — integrated in the same workflow.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <FacilityClimateResilienceDashboard facilityId={facilityId} />
-              </CardContent>
-            </Card>
+            {!isClimateOnly && (
+              <FacilityMeterEfficiencyDashboard facilityId={facilityId} preferMock={false} />
+            )}
+            {!isEnergyOnly && (
+              <Card className="border-emerald-100">
+                <CardHeader>
+                  <CardTitle className="text-sm">Climate resilience &amp; adaptation</CardTitle>
+                  <CardDescription className="text-xs">
+                    Hazard exposure, resilience trend, and adaptation plan tracking — integrated in the same workflow.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <FacilityClimateResilienceDashboard facilityId={facilityId} />
+                </CardContent>
+              </Card>
+            )}
           </div>
         </TabsContent>
 
@@ -584,12 +850,13 @@ export function FacilityIntelligencePlatform({
             <Button
               size="sm"
               className="bg-emerald-600 hover:bg-emerald-700"
-              disabled={!assessmentCycleId || actionPlanStatus === "saving"}
+              loading={actionPlanStatus === "saving"}
+              disabled={!assessmentCycleId}
               onClick={async () => {
                 if (!assessmentCycleId) return
                 setActionPlanStatus("saving")
                 try {
-                  await fetch(`/api/assessment-cycles/${assessmentCycleId}/action-plan`, {
+                  const putRes = await fetch(`/api/assessment-cycles/${assessmentCycleId}/action-plan`, {
                     method: "PUT",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
@@ -606,6 +873,10 @@ export function FacilityIntelligencePlatform({
                       })),
                     }),
                   })
+                  if (!putRes.ok) {
+                    const errBody = await putRes.json().catch(() => ({}))
+                    throw new Error((errBody as { error?: string }).error || "Failed to save recommendations")
+                  }
 
                   const tasks = recommendations
                     .map((r) => ({
@@ -617,17 +888,23 @@ export function FacilityIntelligencePlatform({
                     .filter((t) => Boolean(t.ownerName || t.dueDate))
 
                   if (tasks.length > 0) {
-                    await fetch(`/api/assessment-cycles/${assessmentCycleId}/action-plan`, {
+                    const postRes = await fetch(`/api/assessment-cycles/${assessmentCycleId}/action-plan`, {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({ tasks }),
                     })
+                    if (!postRes.ok) {
+                      const errBody = await postRes.json().catch(() => ({}))
+                      throw new Error((errBody as { error?: string }).error || "Failed to save tasks")
+                    }
                   }
 
                   setActionPlanStatus("saved")
+                  notifySuccess("Action plan saved", "Recommendations and tasks are stored for this assessment cycle.")
                   setTimeout(() => setActionPlanStatus("idle"), 1500)
-                } catch {
+                } catch (e) {
                   setActionPlanStatus("error")
+                  notifyError("Could not save action plan", getErrorMessage(e))
                   setTimeout(() => setActionPlanStatus("idle"), 2500)
                 }
               }}
@@ -713,54 +990,127 @@ export function FacilityIntelligencePlatform({
 
         <TabsContent value="reports" className="mt-4 space-y-4">
           {/* Executive summary strip (v2.0) */}
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-            <Card className="border-emerald-100 lg:col-span-2">
-              <CardHeader className="pb-2">
-                <CardDescription className="text-xs">Total daily energy</CardDescription>
-                <CardTitle className="text-2xl text-emerald-900">
-                  {sizingSummary ? `${sizingSummary.totalDailyLoad.toFixed(1)} kWh/d` : "—"}
-                </CardTitle>
-              </CardHeader>
-            </Card>
-            <Card className="border-emerald-100">
-              <CardHeader className="pb-2">
-                <CardDescription className="text-xs">Indicative solar</CardDescription>
-                <CardTitle className="text-2xl text-emerald-900">
-                  {sizingSummary ? `${sizingSummary.solarArraySize.toFixed(1)} kW` : "—"}
-                </CardTitle>
-              </CardHeader>
-            </Card>
-            <Card className="border-emerald-100">
-              <CardHeader className="pb-2">
-                <CardDescription className="text-xs">Annual savings</CardDescription>
-                <CardTitle className="text-2xl text-emerald-900">
-                  {sizingSummary ? formatCurrency(sizingSummary.annualSavings) : "—"}
-                </CardTitle>
-              </CardHeader>
-            </Card>
-            <Card className="border-emerald-100">
-              <CardHeader className="pb-2">
-                <CardDescription className="text-xs">Resilience status</CardDescription>
-                <CardTitle className="text-2xl text-emerald-900">
-                  {persistedClimateScore?.rcs ?? (climateResilienceScore !== null ? climateResilienceScore : "—")}
-                </CardTitle>
-                {persistedClimateScore && (
-                  <p className="text-[11px] text-muted-foreground">
-                    Tier {persistedClimateScore.tier}
-                    {persistedClimateScore.criticalAttention ? " · Critical attention" : ""}
-                  </p>
-                )}
-              </CardHeader>
-            </Card>
-            <Card className="border-emerald-100">
-              <CardHeader className="pb-2">
-                <CardDescription className="text-xs">Efficiency score (BMI)</CardDescription>
-                <CardTitle className="text-2xl text-emerald-900">
-                  {efficiencyScore !== null ? `${efficiencyScore}%` : "—"}
-                </CardTitle>
-              </CardHeader>
-            </Card>
-          </div>
+          {isClimateOnly ? (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <Card className="border-emerald-100">
+                <CardHeader className="pb-2">
+                  <CardDescription className="text-xs">Resilience capacity (RCS)</CardDescription>
+                  <CardTitle className="text-2xl text-emerald-900">
+                    {persistedClimateScore?.rcs ?? (climateResilienceScore !== null ? climateResilienceScore : "—")}
+                  </CardTitle>
+                </CardHeader>
+              </Card>
+              <Card className="border-emerald-100">
+                <CardHeader className="pb-2">
+                  <CardDescription className="text-xs">Tier &amp; attention</CardDescription>
+                  <CardTitle className="text-2xl text-emerald-900">
+                    {persistedClimateScore ? `Tier ${persistedClimateScore.tier}` : "—"}
+                  </CardTitle>
+                  {persistedClimateScore?.criticalAttention && (
+                    <p className="text-[11px] text-amber-800 font-medium">Critical attention</p>
+                  )}
+                </CardHeader>
+              </Card>
+              <Card className="border-emerald-100">
+                <CardHeader className="pb-2">
+                  <CardDescription className="text-xs">Risk drivers (saved)</CardDescription>
+                  <CardTitle className="text-2xl text-emerald-900">{persistedTopRisks.length}</CardTitle>
+                </CardHeader>
+              </Card>
+              <Card className="border-emerald-100">
+                <CardHeader className="pb-2">
+                  <CardDescription className="text-xs">Operational BMI (if captured)</CardDescription>
+                  <CardTitle className="text-2xl text-emerald-900">
+                    {efficiencyScore !== null ? `${efficiencyScore}%` : "—"}
+                  </CardTitle>
+                </CardHeader>
+              </Card>
+            </div>
+          ) : isEnergyOnly ? (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <Card className="border-emerald-100 lg:col-span-2">
+                <CardHeader className="pb-2">
+                  <CardDescription className="text-xs">Total daily energy</CardDescription>
+                  <CardTitle className="text-2xl text-emerald-900">
+                    {sizingSummary ? `${sizingSummary.totalDailyLoad.toFixed(1)} kWh/d` : "—"}
+                  </CardTitle>
+                </CardHeader>
+              </Card>
+              <Card className="border-emerald-100">
+                <CardHeader className="pb-2">
+                  <CardDescription className="text-xs">Indicative solar</CardDescription>
+                  <CardTitle className="text-2xl text-emerald-900">
+                    {sizingSummary ? `${sizingSummary.solarArraySize.toFixed(1)} kW` : "—"}
+                  </CardTitle>
+                </CardHeader>
+              </Card>
+              <Card className="border-emerald-100">
+                <CardHeader className="pb-2">
+                  <CardDescription className="text-xs">Annual savings</CardDescription>
+                  <CardTitle className="text-2xl text-emerald-900">
+                    {sizingSummary ? formatCurrency(sizingSummary.annualSavings) : "—"}
+                  </CardTitle>
+                </CardHeader>
+              </Card>
+              <Card className="border-emerald-100">
+                <CardHeader className="pb-2">
+                  <CardDescription className="text-xs">Efficiency score (BMI)</CardDescription>
+                  <CardTitle className="text-2xl text-emerald-900">
+                    {efficiencyScore !== null ? `${efficiencyScore}%` : "—"}
+                  </CardTitle>
+                </CardHeader>
+              </Card>
+            </div>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+              <Card className="border-emerald-100 lg:col-span-2">
+                <CardHeader className="pb-2">
+                  <CardDescription className="text-xs">Total daily energy</CardDescription>
+                  <CardTitle className="text-2xl text-emerald-900">
+                    {sizingSummary ? `${sizingSummary.totalDailyLoad.toFixed(1)} kWh/d` : "—"}
+                  </CardTitle>
+                </CardHeader>
+              </Card>
+              <Card className="border-emerald-100">
+                <CardHeader className="pb-2">
+                  <CardDescription className="text-xs">Indicative solar</CardDescription>
+                  <CardTitle className="text-2xl text-emerald-900">
+                    {sizingSummary ? `${sizingSummary.solarArraySize.toFixed(1)} kW` : "—"}
+                  </CardTitle>
+                </CardHeader>
+              </Card>
+              <Card className="border-emerald-100">
+                <CardHeader className="pb-2">
+                  <CardDescription className="text-xs">Annual savings</CardDescription>
+                  <CardTitle className="text-2xl text-emerald-900">
+                    {sizingSummary ? formatCurrency(sizingSummary.annualSavings) : "—"}
+                  </CardTitle>
+                </CardHeader>
+              </Card>
+              <Card className="border-emerald-100">
+                <CardHeader className="pb-2">
+                  <CardDescription className="text-xs">Resilience status</CardDescription>
+                  <CardTitle className="text-2xl text-emerald-900">
+                    {persistedClimateScore?.rcs ?? (climateResilienceScore !== null ? climateResilienceScore : "—")}
+                  </CardTitle>
+                  {persistedClimateScore && (
+                    <p className="text-[11px] text-muted-foreground">
+                      Tier {persistedClimateScore.tier}
+                      {persistedClimateScore.criticalAttention ? " · Critical attention" : ""}
+                    </p>
+                  )}
+                </CardHeader>
+              </Card>
+              <Card className="border-emerald-100">
+                <CardHeader className="pb-2">
+                  <CardDescription className="text-xs">Efficiency score (BMI)</CardDescription>
+                  <CardTitle className="text-2xl text-emerald-900">
+                    {efficiencyScore !== null ? `${efficiencyScore}%` : "—"}
+                  </CardTitle>
+                </CardHeader>
+              </Card>
+            </div>
+          )}
 
           <Card className="border-emerald-100">
             <CardHeader>
@@ -799,7 +1149,8 @@ export function FacilityIntelligencePlatform({
             </CardContent>
           </Card>
 
-          {(persistedTopRisks.length > 0 || persistedTasks.length > 0) && (
+          {!isEnergyOnly &&
+            (isClimateOnly || persistedTopRisks.length > 0 || persistedTasks.length > 0) && (
             <div className="grid gap-4 lg:grid-cols-2">
               <Card className="border-emerald-100">
                 <CardHeader>
@@ -882,10 +1233,12 @@ export function FacilityIntelligencePlatform({
               </Button>
             </CardContent>
           </Card>
-          <p className="text-[11px] text-muted-foreground">
-            For a full engineering PDF including financing, run <span className="font-semibold">Run Design &amp; Finance Engine</span>{" "}
-            under Devices &amp; loads, then download PDF from the cost summary.
-          </p>
+          {!isClimateOnly && (
+            <p className="text-[11px] text-muted-foreground">
+              For a full engineering PDF including financing, run <span className="font-semibold">Run Design &amp; Finance Engine</span>{" "}
+              under Devices &amp; loads, then download PDF from the cost summary.
+            </p>
+          )}
         </TabsContent>
       </Tabs>
     </div>

@@ -2480,6 +2480,29 @@ async function createTablesDirectly(connection: any, dbName: string) {
     console.error('Error creating assessment_cycles table:', error.message)
   }
 
+  // Persisted energy-efficiency state per assessment cycle (sizing + four-point / BMI)
+  try {
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS \`assessment_cycle_energy_state\` (
+        \`id\` varchar(36) NOT NULL,
+        \`assessment_cycle_id\` varchar(36) NOT NULL,
+        \`facility_id\` varchar(36) NOT NULL,
+        \`sizing_data\` json NULL,
+        \`operations_data\` json NULL,
+        \`bmi_trend_json\` json NULL,
+        \`created_at\` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`updated_at\` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`id\`),
+        UNIQUE KEY \`aces_cycle_uniq\` (\`assessment_cycle_id\`),
+        KEY \`aces_cycle_idx\` (\`assessment_cycle_id\`),
+        KEY \`aces_facility_idx\` (\`facility_id\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `)
+    console.log('✅ Created assessment_cycle_energy_state table')
+  } catch (error: any) {
+    console.error('Error creating assessment_cycle_energy_state table:', error.message)
+  }
+
   // Create climate_assessment_responses table
   try {
     await connection.query(`

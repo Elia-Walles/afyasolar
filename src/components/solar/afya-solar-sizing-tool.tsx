@@ -161,6 +161,10 @@ interface AfyaSolarSizingToolProps {
   onFacilityContextChange?: (ctx: FacilityContextSnapshot) => void
   facilityId?: string
   facilityName?: string
+  /** When set with facilityId, sizing + MEU snapshots are saved to the assessment cycle (server). */
+  assessmentCycleId?: string
+  /** Server JSON.blob `sizing_data` — hydrates devices/context when loaded (survives reload). */
+  persistedSizingData?: unknown | null
 }
 
 export function AfyaSolarSizingTool({
@@ -170,6 +174,8 @@ export function AfyaSolarSizingTool({
   onFacilityContextChange,
   facilityId,
   facilityName,
+  assessmentCycleId,
+  persistedSizingData,
 }: AfyaSolarSizingToolProps) {
   const [activeTab, setActiveTab] = useState<"inventory" | "energy" | "cost">("inventory")
   const emptyDevice = (id: string): Device => ({
@@ -201,9 +207,58 @@ export function AfyaSolarSizingTool({
   const [quoteError, setQuoteError] = useState<string | null>(null)
   const [quoteData, setQuoteData] = useState<QuoteApiResponse["data"] | null>(null)
 
-  // Hydrate state from sessionStorage (per-tab, temporary) on first mount
+  const dbHydratedRef = useRef(false)
+
+  useEffect(() => {
+    dbHydratedRef.current = false
+  }, [assessmentCycleId])
+
+  // Hydrate from persisted assessment cycle (database) — wins over sessionStorage
+  useEffect(() => {
+    if (!persistedSizingData || typeof persistedSizingData !== "object") return
+    if (dbHydratedRef.current) return
+    const parsed = persistedSizingData as {
+      devices?: Device[]
+      facilityData?: FacilityData
+      solarOffset?: number
+      systemCost?: number
+      activeTab?: typeof activeTab
+    }
+    try {
+      if (parsed.devices && Array.isArray(parsed.devices) && parsed.devices.length > 0) {
+        setDevices(
+          parsed.devices.map((d: Device) => ({
+            ...emptyDevice(d.id || String(Math.random())),
+            ...d,
+            category: d.category ?? "other",
+            criticality: d.criticality ?? "non-essential",
+            backupRequired: Boolean(d.backupRequired),
+            room: d.room ?? "",
+          }))
+        )
+      }
+      if (parsed.facilityData) {
+        setFacilityData((prev) => ({ ...prev, ...parsed.facilityData }))
+      }
+      if (typeof parsed.solarOffset === "number") {
+        setSolarOffset(parsed.solarOffset)
+      }
+      if (typeof parsed.systemCost === "number") {
+        setSystemCost(parsed.systemCost)
+      }
+      if (parsed.activeTab) {
+        setActiveTab(parsed.activeTab)
+      }
+      dbHydratedRef.current = true
+    } catch {
+      // ignore
+    }
+  }, [persistedSizingData])
+
+  // Hydrate state from sessionStorage (per-tab, temporary) on first mount — skipped if DB snapshot applied
   useEffect(() => {
     if (typeof window === "undefined") return
+    if (dbHydratedRef.current) return
     try {
       const raw = window.sessionStorage.getItem(SIZING_STORAGE_KEY)
       if (!raw) return
@@ -480,6 +535,32 @@ export function AfyaSolarSizingTool({
       // Best-effort only; ignore storage failures
     }
   }, [devices, facilityData, solarOffset, systemCost, activeTab])
+
+  // Persist sizing + MEU snapshots to assessment cycle (facility-scoped on server)
+  useEffect(() => {
+    if (!assessmentCycleId || !facilityId) return
+    const t = window.setTimeout(async () => {
+      try {
+        const sizingData = {
+          devices,
+          facilityData,
+          solarOffset,
+          systemCost,
+          activeTab,
+          sizingSummary: lastSizingRef.current,
+          meuSummary: lastMeuRef.current,
+        }
+        await fetch(`/api/assessment-cycles/${assessmentCycleId}/energy`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sizingData }),
+        })
+      } catch {
+        // offline / transient
+      }
+    }, 1000)
+    return () => window.clearTimeout(t)
+  }, [devices, facilityData, solarOffset, systemCost, activeTab, assessmentCycleId, facilityId])
 
   useEffect(() => {
     onFacilityContextChange?.({

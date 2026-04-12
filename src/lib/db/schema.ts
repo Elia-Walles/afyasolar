@@ -2452,6 +2452,24 @@ export const reportArtifacts = mysqlTable('report_artifacts', {
 }))
 
 /**
+ * Persisted energy-efficiency inputs for an assessment cycle (devices/loads, facility context, BMI / four-point).
+ * Climate data lives in climate_* tables; this holds sizing + operational questionnaire state.
+ */
+export const assessmentCycleEnergyState = mysqlTable('assessment_cycle_energy_state', {
+  id: varchar('id', { length: 36 }).primaryKey(),
+  assessmentCycleId: varchar('assessment_cycle_id', { length: 36 }).notNull().unique(),
+  facilityId: varchar('facility_id', { length: 36 }).notNull(),
+  sizingData: json('sizing_data'), // devices, facilityData, solarOffset, systemCost, activeTab, sizingSummary, meuSummary snapshots
+  operationsData: json('operations_data'), // four-point field values + computed BMI / section scores
+  bmiTrendJson: json('bmi_trend_json'), // [{ date, value }] optional trend from intelligence UI
+  createdAt: datetime('created_at', { mode: 'date' }).notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: datetime('updated_at', { mode: 'date' }).notNull().default(sql`CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`),
+}, (table) => ({
+  cycleIdx: index('aces_cycle_idx').on(table.assessmentCycleId),
+  facilityIdx: index('aces_facility_idx').on(table.facilityId),
+}))
+
+/**
  * Push subscriptions table for Web Push notifications
  */
 export const pushSubscriptions = mysqlTable('push_subscriptions', {

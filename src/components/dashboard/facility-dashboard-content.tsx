@@ -35,7 +35,8 @@ import {
   Leaf,
   CheckCircle,
   XCircle,
-  Download
+  Download,
+  CloudSun,
 } from "lucide-react"
 import Image from "next/image"
 import { LogoutButton } from "@/components/logout-button"
@@ -83,7 +84,7 @@ interface FacilityDashboardContentProps {
   onSectionChange?: (section: NavSection) => void
 }
 
-type NavSection = 'overview' | 'devices' | 'energy' | 'energy-efficiency' | 'bills-payment' | 'notifications' | 'report' | 'carbon-credits' | 'subscription' | 'settings'
+type NavSection = 'overview' | 'devices' | 'energy' | 'energy-efficiency' | 'climate-resilience' | 'bills-payment' | 'notifications' | 'report' | 'carbon-credits' | 'subscription' | 'settings'
 
 interface FacilityNotification {
   id: string
@@ -104,6 +105,7 @@ const navItems: { id: NavSection; label: string; icon: React.ElementType }[] = [
   { id: 'devices', label: 'Devices', icon: Plug },
   { id: 'energy', label: 'Energy', icon: Zap },
   { id: 'energy-efficiency', label: 'Energy Efficiency', icon: Gauge },
+  { id: 'climate-resilience', label: 'Climate Resilience', icon: CloudSun },
   { id: 'bills-payment', label: 'Bills & Payment', icon: Receipt },
   { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'report', label: 'Report', icon: FileText },
@@ -1433,6 +1435,7 @@ export function FacilityDashboardContent({
                     <FacilityIntelligencePlatform
                       facilityId={facility?.id}
                       facilityName={facility?.name ?? undefined}
+                      platformScope="energy"
                       sizingSummary={sizingSummary}
                       meuSummary={meuSummary}
                       bmiSummary={bmiSummary}
@@ -1458,6 +1461,38 @@ export function FacilityDashboardContent({
                     </CardContent>
                   </Card>
                 )}
+              </div>
+            )}
+
+            {currentActiveSection === 'climate-resilience' && (
+              <div className="space-y-6">
+                <Card className={panelCardClass}>
+                  <CardHeader>
+                    <CardTitle className={cn("flex items-center gap-2", sectionTitleClass)}>
+                      <CloudSun className="w-5 h-5 text-green-600" />
+                      Climate resilience
+                    </CardTitle>
+                    <CardDescription className={metaTextClass}>
+                      Guided climate readiness, hazard context, adaptation tracking, and saved risk drivers (same assessment
+                      cycle as Energy Efficiency).
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="p-2 sm:p-4">
+                    <FacilityIntelligencePlatform
+                      facilityId={facility?.id}
+                      facilityName={facility?.name ?? undefined}
+                      platformScope="climate"
+                      sizingSummary={sizingSummary}
+                      meuSummary={meuSummary}
+                      bmiSummary={bmiSummary}
+                      sectionScores={sectionScores}
+                      onSizingSummaryChange={setSizingSummary}
+                      onMeuSummaryChange={setMeuSummary}
+                      onBmiSummaryChange={setBmiSummary}
+                      onSectionScoresChange={setSectionScores}
+                    />
+                  </CardContent>
+                </Card>
               </div>
             )}
 
