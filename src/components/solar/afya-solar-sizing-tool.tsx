@@ -165,6 +165,7 @@ interface AfyaSolarSizingToolProps {
   assessmentCycleId?: string
   /** Server JSON.blob `sizing_data` — hydrates devices/context when loaded (survives reload). */
   persistedSizingData?: unknown | null
+  readOnly?: boolean
 }
 
 export function AfyaSolarSizingTool({
@@ -176,6 +177,7 @@ export function AfyaSolarSizingTool({
   facilityName,
   assessmentCycleId,
   persistedSizingData,
+  readOnly = false,
 }: AfyaSolarSizingToolProps) {
   const [activeTab, setActiveTab] = useState<"inventory" | "energy" | "cost">("inventory")
   const emptyDevice = (id: string): Device => ({
@@ -521,6 +523,7 @@ export function AfyaSolarSizingTool({
 
   // Persist current sizing state to sessionStorage so it survives reloads in this tab
   useEffect(() => {
+    if (readOnly) return
     if (typeof window === "undefined") return
     try {
       const payload = JSON.stringify({
@@ -534,10 +537,11 @@ export function AfyaSolarSizingTool({
     } catch {
       // Best-effort only; ignore storage failures
     }
-  }, [devices, facilityData, solarOffset, systemCost, activeTab])
+  }, [devices, facilityData, solarOffset, systemCost, activeTab, readOnly])
 
   // Persist sizing + MEU snapshots to assessment cycle (facility-scoped on server)
   useEffect(() => {
+    if (readOnly) return
     if (!assessmentCycleId || !facilityId) return
     const t = window.setTimeout(async () => {
       try {
@@ -560,7 +564,7 @@ export function AfyaSolarSizingTool({
       }
     }, 1000)
     return () => window.clearTimeout(t)
-  }, [devices, facilityData, solarOffset, systemCost, activeTab, assessmentCycleId, facilityId])
+  }, [devices, facilityData, solarOffset, systemCost, activeTab, assessmentCycleId, facilityId, readOnly])
 
   useEffect(() => {
     onFacilityContextChange?.({
@@ -701,7 +705,16 @@ export function AfyaSolarSizingTool({
   }
 
   return (
+    <fieldset
+      disabled={readOnly}
+      className="min-w-0 border-0 p-0 m-0 disabled:opacity-[0.88]"
+    >
     <div className="space-y-6">
+      {readOnly && (
+        <p className="text-xs text-muted-foreground rounded-lg border border-emerald-100 bg-emerald-50/40 px-3 py-2">
+          Viewing a saved devices &amp; loads snapshot for this assessment record (read-only).
+        </p>
+      )}
       <Tabs
         value={activeTab}
         onValueChange={(value) => setActiveTab(value as typeof activeTab)}
@@ -1892,6 +1905,7 @@ export function AfyaSolarSizingTool({
         </TabsContent>
       </Tabs>
     </div>
+    </fieldset>
   )
 }
 

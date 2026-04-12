@@ -353,10 +353,13 @@ export function ClimateResilienceAssessment({
   facilityId,
   assessmentCycleId,
   onCapacityScoreChange,
+  readOnly = false,
 }: {
   facilityId: string
   assessmentCycleId?: string
   onCapacityScoreChange?: (score: number | null) => void
+  /** Historical / submitted cycle — no edits or autosave */
+  readOnly?: boolean
 }) {
   const [lang, setLang] = useState<Lang>("en")
   const [step, setStep] = useState<number>(0)
@@ -425,6 +428,7 @@ export function ClimateResilienceAssessment({
   }, [facilityId])
 
   useEffect(() => {
+    if (readOnly) return
     try {
       // Keep local drafts for offline continuity even when DB persistence is enabled.
       localStorage.setItem(
@@ -434,7 +438,7 @@ export function ClimateResilienceAssessment({
     } catch {
       // ignore
     }
-  }, [facilityId, responses, evidence, step])
+  }, [facilityId, responses, evidence, step, readOnly])
 
   const pages = useMemo(() => {
     const groups: { id: string; title_en: string; title_sw: string; items: Question[] }[] = [
@@ -473,6 +477,7 @@ export function ClimateResilienceAssessment({
   // Persist to DB (auto-save) when assessmentCycleId is available.
   useEffect(() => {
     let cancelled = false
+    if (readOnly) return
     if (!assessmentCycleId) return
     if (!remoteLoaded) return
 
@@ -526,7 +531,7 @@ export function ClimateResilienceAssessment({
       cancelled = true
       clearTimeout(timeout)
     }
-  }, [assessmentCycleId, evidence, remoteLoaded, responses])
+  }, [assessmentCycleId, evidence, remoteLoaded, responses, readOnly])
 
   const addEvidence = (questionCode: string, item: Omit<EvidenceItem, "capturedAt" | "questionCode">) => {
     setEvidence((prev) => [
@@ -540,10 +545,12 @@ export function ClimateResilienceAssessment({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
           <p className="text-xs text-muted-foreground">
-            {t(
-              "Guided climate resilience assessment (CRiPHC-aligned scoring scaffold).",
-              "Tathmini elekezi ya uimara wa hali ya hewa (skafoldi ya alama)."
-            )}
+            {readOnly
+              ? t("Viewing a saved assessment record (read-only).", "Unaona rekodi iliyohifadhiwa (soma tu).")
+              : t(
+                  "Guided climate resilience assessment (CRiPHC-aligned scoring scaffold).",
+                  "Tathmini elekezi ya uimara wa hali ya hewa (skafoldi ya alama)."
+                )}
           </p>
         </div>
         <Button
@@ -557,6 +564,10 @@ export function ClimateResilienceAssessment({
         </Button>
       </div>
 
+      <fieldset
+        disabled={readOnly}
+        className="min-w-0 space-y-4 border-0 p-0 m-0 disabled:opacity-[0.88]"
+      >
       <Card className="border-emerald-100">
         <CardHeader className="pb-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -857,6 +868,7 @@ export function ClimateResilienceAssessment({
           )}
         </CardContent>
       </Card>
+      </fieldset>
     </div>
   )
 }

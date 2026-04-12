@@ -30,6 +30,7 @@ interface FourPointAssessmentProps {
   assessmentCycleId?: string
   /** Restored from `/api/assessment-cycles/.../energy` operations_data */
   initialOperationsData?: FourPointPersistedState | null
+  readOnly?: boolean
 }
 
 function scoreReliability(outageHours: string, batteryBackup: string) {
@@ -77,6 +78,7 @@ export function FourPointAssessment({
   onSectionScoresChange,
   assessmentCycleId,
   initialOperationsData,
+  readOnly = false,
 }: FourPointAssessmentProps) {
   const [outageHours, setOutageHours] = useState<string>("")
   const [batteryBackup, setBatteryBackup] = useState<string>("")
@@ -195,6 +197,7 @@ export function FourPointAssessment({
   }, [sectionScoresLive])
 
   useEffect(() => {
+    if (readOnly) return
     if (!assessmentCycleId) return
     const t = window.setTimeout(async () => {
       try {
@@ -234,6 +237,7 @@ export function FourPointAssessment({
     assessmentScore,
     openCard,
     sectionScoresLive,
+    readOnly,
   ])
 
   const card = (
@@ -280,13 +284,17 @@ export function FourPointAssessment({
   }
 
   return (
-    <div className="space-y-4">
+    <fieldset
+      disabled={readOnly}
+      className="min-w-0 space-y-4 border-0 p-0 m-0 disabled:opacity-[0.88]"
+    >
       <Card className="border-emerald-100">
         <CardHeader>
           <CardTitle>Operational efficiency &amp; management</CardTitle>
           <CardDescription>
-            Four scored domains (same logic as the classic 4-point checklist). Expand each card to answer; scores update
-            live. Calculate when all fields are complete.
+            {readOnly
+              ? "Saved responses for this assessment record (read-only)."
+              : "Four scored domains (same logic as the classic 4-point checklist). Expand each card to answer; scores update live. Calculate when all fields are complete."}
           </CardDescription>
         </CardHeader>
       </Card>
@@ -500,6 +508,6 @@ export function FourPointAssessment({
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+    </fieldset>
   )
 }

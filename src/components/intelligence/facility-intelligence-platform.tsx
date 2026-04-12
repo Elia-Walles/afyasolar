@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -8,6 +8,23 @@ import { Progress } from "@/components/ui/progress"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import {
   AfyaSolarSizingTool,
   type SizingSummary,
@@ -30,10 +47,17 @@ import {
   LayoutDashboard,
   LineChart,
   ListChecks,
+  RotateCcw,
   Sparkles,
 } from "lucide-react"
 
 type IntelTab = "overview" | "assess" | "analyze" | "action" | "reports"
+
+type AssessmentCycleRow = {
+  id: string
+  status: string
+  startedAt?: string | Date | null
+}
 
 const tabTriggerClass =
   "text-xs sm:text-sm rounded-md data-[state=active]:bg-white data-[state=active]:text-emerald-800 data-[state=active]:shadow-sm"
@@ -99,12 +123,78 @@ export function FacilityIntelligencePlatform({
     operationsData: unknown | null
     bmiTrendJson: unknown | null
   } | null>(null)
+  const [assessmentCyclesList, setAssessmentCyclesList] = useState<AssessmentCycleRow[]>([])
+  const [reassessBusy, setReassessBusy] = useState(false)
+  const [reassessDialogOpen, setReassessDialogOpen] = useState(false)
 
+  const selectedCycle = useMemo(
+    () => assessmentCyclesList.find((c) => c.id === assessmentCycleId) ?? null,
+    [assessmentCyclesList, assessmentCycleId]
+  )
+  const assessmentReadOnly = Boolean(selectedCycle && selectedCycle.status !== "draft")
+
+  const formatCycleLabel = useCallback((c: AssessmentCycleRow) => {
+    const raw = c.startedAt
+    let d: Date
+    if (raw instanceof Date) d = raw
+    else if (typeof raw === "string") d = new Date(raw)
+    else d = new Date()
+    const label = Number.isFinite(d.getTime()) ? d.toLocaleDateString(undefined, { dateStyle: "medium" }) : "—"
+    const tag =
+      c.status === "draft" ? "Current (editing)" : c.status === "completed" ? "Previous (saved)" : c.status
+    return `${label} · ${tag}`
+  }, [])
+
+  const handleReassessConfirm = useCallback(async () => {
+    if (!facilityId || !assessmentCycleId) return
+    setReassessBusy(true)
+    setReassessDialogOpen(false)
+    try {
+      const patchRes = await fetch(`/api/facility/${facilityId}/assessment-cycles/${assessmentCycleId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "completed" }),
+      })
+      const patchJson = await patchRes.json().catch(() => ({}))
+      if (!patchRes.ok) {
+        throw new Error((patchJson as { error?: string }).error || "Could not close the current assessment")
+      }
+
+      const createRes = await fetch(`/api/facility/${facilityId}/assessment-cycles`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ version: "2.0" }),
+      })
+      const createJson = await createRes.json()
+      if (!createRes.ok || !createJson?.cycle?.id) {
+        throw new Error((createJson as { error?: string }).error || "Could not start a new assessment")
+      }
+
+      const newId = createJson.cycle.id as string
+      const listRes = await fetch(`/api/facility/${facilityId}/assessment-cycles`, { cache: "no-store" })
+      const listJson = await listRes.json()
+      const nextList: AssessmentCycleRow[] = Array.isArray(listJson?.cycles) ? listJson.cycles : []
+      setAssessmentCyclesList(nextList)
+      setAssessmentCycleId(newId)
+      notifySuccess(
+        "New assessment started",
+        "Previous answers remain on file under the saved date. Enter updates in this new cycle."
+      )
+      setMainTab("assess")
+    } catch (e) {
+      notifyError("Could not re-assess", getErrorMessage(e))
+    } finally {
+      setReassessBusy(false)
+    }
+  }, [facilityId, assessmentCycleId])
+
+  // Load cycles; ensure a draft exists for new entries.
   useEffect(() => {
     let cancelled = false
     if (!facilityId) {
-      setClimateResilienceScore(null)
+      setAssessmentCyclesList([])
       setAssessmentCycleId(null)
+      setClimateResilienceScore(null)
       setPersistedClimateScore(null)
       setPersistedTopRisks([])
       setPersistedTasks([])
@@ -112,56 +202,100 @@ export function FacilityIntelligencePlatform({
     }
     ;(async () => {
       try {
-        // Ensure there is an active assessment cycle (draft).
         const cyclesRes = await fetch(`/api/facility/${facilityId}/assessment-cycles`, { cache: "no-store" })
         const cyclesJson = await cyclesRes.json()
-        const cycles = Array.isArray(cyclesJson?.cycles) ? cyclesJson.cycles : []
-        const draft = cycles.find((c: any) => c?.status === "draft") ?? cycles[0]
+        let cycles: AssessmentCycleRow[] = Array.isArray(cyclesJson?.cycles) ? cyclesJson.cycles : []
 
-        let cycleId: string | null = draft?.id ?? null
-        if (!cycleId) {
+        let draft = cycles.find((c) => c?.status === "draft")
+        if (!draft) {
           const createRes = await fetch(`/api/facility/${facilityId}/assessment-cycles`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ version: "2.0" }),
           })
           const createJson = await createRes.json()
-          cycleId = createJson?.cycle?.id ?? null
-        }
-
-        if (!cancelled) setAssessmentCycleId(cycleId)
-
-        // Load persisted climate score if present.
-        if (cycleId) {
-          const climateRes = await fetch(`/api/assessment-cycles/${cycleId}/climate`, { cache: "no-store" })
-          const climateJson = await climateRes.json()
-          const score = climateJson?.score?.rcs
-          if (!cancelled && score !== undefined && score !== null) {
-            setPersistedClimateScore({
-              rcs: Number(climateJson.score.rcs),
-              tier: Number(climateJson.score.tier ?? 0),
-              criticalAttention: Boolean(climateJson.score.criticalAttention),
-            })
-            setPersistedTopRisks(Array.isArray(climateJson?.topRisks) ? climateJson.topRisks : [])
-            setClimateResilienceScore(Number(score))
-            return
+          if (createJson?.cycle) {
+            draft = createJson.cycle
+            cycles = [createJson.cycle, ...cycles]
           }
         }
 
-        // Fallback to existing seeded endpoint (legacy dashboards).
-        const res = await fetch(`/api/facility/${facilityId}/climate-resilience`, { cache: "no-store" })
-        const json = await res.json()
-        if (!cancelled && json?.data?.profile?.overallResilienceScore !== undefined && json?.data?.profile?.overallResilienceScore !== null) {
-          setClimateResilienceScore(Number(json.data.profile.overallResilienceScore))
-        }
+        if (cancelled) return
+        setAssessmentCyclesList(cycles)
+
+        setAssessmentCycleId((prev) => {
+          if (prev && cycles.some((c) => c.id === prev)) return prev
+          return draft?.id ?? cycles[0]?.id ?? null
+        })
       } catch {
-        if (!cancelled) setClimateResilienceScore(null)
+        if (!cancelled) {
+          setAssessmentCyclesList([])
+          setAssessmentCycleId(null)
+        }
       }
     })()
     return () => {
       cancelled = true
     }
   }, [facilityId])
+
+  // Climate scores for the selected assessment cycle
+  useEffect(() => {
+    let cancelled = false
+    if (!facilityId || !assessmentCycleId) {
+      setClimateResilienceScore(null)
+      setPersistedClimateScore(null)
+      setPersistedTopRisks([])
+      return
+    }
+
+    const isDraftSelected = selectedCycle?.status === "draft"
+
+    ;(async () => {
+      try {
+        const climateRes = await fetch(`/api/assessment-cycles/${assessmentCycleId}/climate`, { cache: "no-store" })
+        const climateJson = await climateRes.json()
+        const score = climateJson?.score?.rcs
+        if (cancelled) return
+
+        if (score !== undefined && score !== null) {
+          setPersistedClimateScore({
+            rcs: Number(climateJson.score.rcs),
+            tier: Number(climateJson.score.tier ?? 0),
+            criticalAttention: Boolean(climateJson.score.criticalAttention),
+          })
+          setPersistedTopRisks(Array.isArray(climateJson?.topRisks) ? climateJson.topRisks : [])
+          setClimateResilienceScore(Number(score))
+          return
+        }
+
+        setPersistedClimateScore(null)
+        setPersistedTopRisks([])
+        if (!isDraftSelected) {
+          setClimateResilienceScore(null)
+          return
+        }
+
+        const res = await fetch(`/api/facility/${facilityId}/climate-resilience`, { cache: "no-store" })
+        const json = await res.json()
+        if (
+          !cancelled &&
+          json?.data?.profile?.overallResilienceScore !== undefined &&
+          json?.data?.profile?.overallResilienceScore !== null
+        ) {
+          setClimateResilienceScore(Number(json.data.profile.overallResilienceScore))
+        } else if (!cancelled) {
+          setClimateResilienceScore(null)
+        }
+      } catch {
+        if (!cancelled) setClimateResilienceScore(null)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [facilityId, assessmentCycleId, selectedCycle?.status])
 
   // Load persisted energy-efficiency state (devices/loads + four-point BMI) for this assessment cycle
   useEffect(() => {
@@ -182,7 +316,7 @@ export function FacilityIntelligencePlatform({
         })
         if (Array.isArray(j.bmiTrendJson) && j.bmiTrendJson.length > 0) {
           setBmiTrend(j.bmiTrendJson as { date: string; value: number }[])
-        } else if (facilityId && typeof window !== "undefined") {
+        } else if (!assessmentReadOnly && facilityId && typeof window !== "undefined") {
           try {
             const key = `afyasolar:bmiTrend:${facilityId}`
             const prevRaw = window.localStorage.getItem(key)
@@ -199,9 +333,10 @@ export function FacilityIntelligencePlatform({
     return () => {
       cancelled = true
     }
-  }, [assessmentCycleId, facilityId])
+  }, [assessmentCycleId, facilityId, assessmentReadOnly])
 
   useEffect(() => {
+    if (assessmentReadOnly) return
     if (!assessmentCycleId || bmiTrend.length === 0) return
     const t = window.setTimeout(async () => {
       try {
@@ -215,7 +350,7 @@ export function FacilityIntelligencePlatform({
       }
     }, 1200)
     return () => window.clearTimeout(t)
-  }, [bmiTrend, assessmentCycleId])
+  }, [bmiTrend, assessmentCycleId, assessmentReadOnly])
 
   useEffect(() => {
     if (isEnergyOnly && assessSub === "climate") setAssessSub("devices")
@@ -708,6 +843,58 @@ export function FacilityIntelligencePlatform({
         </TabsContent>
 
         <TabsContent value="assess" className="space-y-4 mt-4">
+          {facilityId && assessmentCyclesList.length > 0 && (
+            <Card className="border-emerald-100 bg-white/90">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">Assessment record</CardTitle>
+                <CardDescription className="text-xs">
+                  View previous saved data or the current cycle. Re-assess starts a new cycle after you have finished the
+                  checklist.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+                <div className="space-y-1.5 min-w-[min(100%,280px)] flex-1 max-w-md">
+                  <Label className="text-xs">View data for</Label>
+                  <Select
+                    value={assessmentCycleId ?? ""}
+                    onValueChange={(id) => setAssessmentCycleId(id)}
+                    disabled={reassessBusy}
+                  >
+                    <SelectTrigger className="h-9 text-xs">
+                      <SelectValue placeholder="Select assessment" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {assessmentCyclesList.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>
+                          {formatCycleLabel(c)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {assessmentReadOnly && (
+                    <Badge variant="secondary" className="text-[10px]">
+                      Read-only (previous submission)
+                    </Badge>
+                  )}
+                  {!assessmentReadOnly && completion.assessDone && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="border-emerald-200"
+                      loading={reassessBusy}
+                      onClick={() => setReassessDialogOpen(true)}
+                    >
+                      <RotateCcw className="h-4 w-4 mr-1" aria-hidden />
+                      Re-assess
+                    </Button>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          )}
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-emerald-900/90">
               {isClimateOnly
@@ -726,6 +913,7 @@ export function FacilityIntelligencePlatform({
                     facilityId={facilityId}
                     assessmentCycleId={assessmentCycleId ?? undefined}
                     onCapacityScoreChange={(score) => setClimateResilienceScore(score)}
+                    readOnly={assessmentReadOnly}
                   />
                   <Card className="border-emerald-100">
                     <CardHeader className="pb-2">
@@ -769,6 +957,7 @@ export function FacilityIntelligencePlatform({
                   facilityName={facilityName}
                   assessmentCycleId={assessmentCycleId ?? undefined}
                   persistedSizingData={energySnapshot?.sizingData}
+                  readOnly={assessmentReadOnly}
                 />
               </TabsContent>
               <TabsContent value="operations" className="mt-4">
@@ -782,6 +971,7 @@ export function FacilityIntelligencePlatform({
                       ? (energySnapshot.operationsData as any)
                       : null
                   }
+                  readOnly={assessmentReadOnly}
                 />
               </TabsContent>
               <TabsContent value="climate" className="mt-4">
@@ -791,6 +981,7 @@ export function FacilityIntelligencePlatform({
                       facilityId={facilityId}
                       assessmentCycleId={assessmentCycleId ?? undefined}
                       onCapacityScoreChange={(score) => setClimateResilienceScore(score)}
+                      readOnly={assessmentReadOnly}
                     />
                     <Card className="border-emerald-100">
                       <CardHeader className="pb-2">
@@ -851,9 +1042,9 @@ export function FacilityIntelligencePlatform({
               size="sm"
               className="bg-emerald-600 hover:bg-emerald-700"
               loading={actionPlanStatus === "saving"}
-              disabled={!assessmentCycleId}
+              disabled={!assessmentCycleId || assessmentReadOnly}
               onClick={async () => {
-                if (!assessmentCycleId) return
+                if (!assessmentCycleId || assessmentReadOnly) return
                 setActionPlanStatus("saving")
                 try {
                   const putRes = await fetch(`/api/assessment-cycles/${assessmentCycleId}/action-plan`, {
@@ -959,6 +1150,7 @@ export function FacilityIntelligencePlatform({
                     <Input
                       value={actionMeta[r.id]?.owner ?? ""}
                       placeholder="e.g. Facility manager"
+                      disabled={assessmentReadOnly}
                       onChange={(e) =>
                         setActionMeta((prev) => ({
                           ...prev,
@@ -973,6 +1165,7 @@ export function FacilityIntelligencePlatform({
                     <Input
                       type="date"
                       value={actionMeta[r.id]?.dueDate ?? ""}
+                      disabled={assessmentReadOnly}
                       onChange={(e) =>
                         setActionMeta((prev) => ({
                           ...prev,
@@ -1241,6 +1434,24 @@ export function FacilityIntelligencePlatform({
           )}
         </TabsContent>
       </Tabs>
+
+      <AlertDialog open={reassessDialogOpen} onOpenChange={setReassessDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Start a new assessment?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This marks the current cycle as saved, then opens a new one for updated entries. You can always switch back
+              to older data using &quot;View data for&quot;.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction type="button" onClick={() => void handleReassessConfirm()}>
+              Continue
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
