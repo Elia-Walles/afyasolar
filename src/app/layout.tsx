@@ -10,7 +10,7 @@ import { PushNotificationPrompt } from "@/components/push-notification-prompt"
 import "../styles/globals.css"
 
 export const metadata: Metadata = {
-  title: "Afya Solar| Healthcare facility solar dashboards",
+  title: "Afya Solar | Healthcare facility solar dashboards",
   description: "Afya Solar: solar energy systems, monitoring, and facility energy dashboards for healthcare facilities in Tanzania.",
   generator: "Afya Solar",
   manifest: "/manifest.json",
