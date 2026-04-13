@@ -81,6 +81,7 @@ import AdminSolarEnergyReports from "@/components/solar/admin-solar-energy-repor
 import AdminSolarCarbonCredits from "@/components/solar/admin-solar-carbon-credits"
 import { EnergyEfficiencyAssessment } from "@/components/energy/energy-efficiency-assessment"
 import { ClimateResilienceAssessment } from "@/components/climate/climate-resilience-assessment"
+import { FacilityCarbonCredits } from "@/components/dashboard/facility-carbon-credits"
 import { useComprehensiveFacilities, type ComprehensiveFacility } from "@/hooks/use-facilities"
 import { useFacilities } from "@/hooks/use-facilities"
 import type { Facility } from "@/types"
@@ -235,6 +236,7 @@ export function AdminDashboard({ initialSection = "overview" }: AdminDashboardPr
   // Assessment facility selection states
   const [energyAssessmentFacility, setEnergyAssessmentFacility] = useState<string>('')
   const [climateResilientFacility, setClimateResilientFacility] = useState<string>('')
+  const [carbonCreditsFacility, setCarbonCreditsFacility] = useState<string>('')
   const bookingFacilities: any[] = []
   const bookingFacilitiesLoading = false
   const refetchBookingFacilities = async () => {}
@@ -1122,7 +1124,61 @@ export function AdminDashboard({ initialSection = "overview" }: AdminDashboardPr
             )}
 
             {activeSection === 'solar-carbon-credits' && (
-              <AdminSolarCarbonCredits />
+              <div className="space-y-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Leaf className="w-5 h-5 text-green-600" />
+                      Carbon Credits Assessment
+                    </CardTitle>
+                    <CardDescription>
+                      Calculate and manage carbon credits for any facility in the system.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {/* Facility Selection */}
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">Select Facility</Label>
+                      <Select value={carbonCreditsFacility} onValueChange={setCarbonCreditsFacility}>
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Choose a facility for carbon credits assessment...">
+                            {isLoading && (
+                              <div className="flex items-center gap-2">
+                                <div className="w-4 h-4 border-2 border-green-600 border-t-transparent rounded-full animate-spin" />
+                                <span>Loading facilities...</span>
+                              </div>
+                            )}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {facilities?.map((facility) => (
+                            <SelectItem key={facility.id} value={facility.id}>
+                              <div className="flex flex-col">
+                                <span className="font-medium">{facility.name}</span>
+                                <span className="text-xs text-gray-500">{facility.city}, {facility.region}</span>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {facilities?.length === 0 && !isLoading && (
+                        <p className="text-sm text-gray-500">No facilities found. Please ensure facilities are registered in the system.</p>
+                      )}
+                    </div>
+
+                    {/* Assessment Content */}
+                    {carbonCreditsFacility && (
+                      <div className="border border-gray-200 rounded-lg p-4">
+                        <p className="text-sm text-gray-600 mb-4">
+                          Performing carbon credits assessment for: 
+                          <strong> {facilities?.find(f => f.id === carbonCreditsFacility)?.name}</strong>
+                        </p>
+                        <FacilityCarbonCredits facilityId={carbonCreditsFacility} />
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
             )}
 
             {activeSection === 'energy-assessment' && (
