@@ -82,12 +82,12 @@ export function FacilityCarbonCredits({ facilityId }: FacilityCarbonCreditsProps
         
         // Fetch energy assessment data for MEU (Major Energy Uses) devices
         const energyResponse = await fetch(`/api/assessment-cycles/${latestCycle.id}/energy`)
-        let devices = []
+        let meuDevices = []
         
         if (energyResponse.ok) {
           const energyData = await energyResponse.json()
           if (energyData.stateJson?.meuRows) {
-            devices = energyData.stateJson.meuRows.map((row: any, index: number) => ({
+            meuDevices = energyData.stateJson.meuRows.map((row: any, index: number) => ({
               id: `meu-${index}`,
               name: row.equipment || `Device ${index + 1}`,
               type: 'energy-assessment',
@@ -100,8 +100,8 @@ export function FacilityCarbonCredits({ facilityId }: FacilityCarbonCreditsProps
         }
         
         // If no energy assessment devices, create default devices based on common medical equipment
-        if (devices.length === 0) {
-          devices = [
+        if (meuDevices.length === 0) {
+          meuDevices = [
             { id: 'lighting', name: 'Lighting', type: 'default', powerW: '100', hoursPerDay: '12', kwhPerDay: 1.2, critical: false },
             { id: 'vaccine-fridge', name: 'Vaccine Fridge', type: 'default', powerW: '150', hoursPerDay: '24', kwhPerDay: 3.6, critical: true },
             { id: 'oxygen-concentrator', name: 'Oxygen Concentrator', type: 'default', powerW: '300', hoursPerDay: '8', kwhPerDay: 2.4, critical: true },
@@ -111,7 +111,7 @@ export function FacilityCarbonCredits({ facilityId }: FacilityCarbonCreditsProps
           ]
         }
         
-        return devices
+        return meuDevices
       } catch (error) {
         console.error('Failed to fetch assessment devices:', error)
         // Return default devices on error
@@ -278,9 +278,9 @@ export function FacilityCarbonCredits({ facilityId }: FacilityCarbonCreditsProps
                       <SelectValue placeholder="Select device" />
                     </SelectTrigger>
                     <SelectContent>
-                      {devices.map((device: any) => (
+                      {assessmentDevices.map((device: any) => (
                         <SelectItem key={device.id} value={device.id}>
-                          {device.name || device.serialNumber}
+                          {device.name} {device.powerW && `(${device.powerW}W)`}
                         </SelectItem>
                       ))}
                     </SelectContent>
