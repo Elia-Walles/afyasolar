@@ -60,6 +60,7 @@ export function FacilityCarbonCredits({ facilityId }: FacilityCarbonCreditsProps
   const [startDeviceIndex, setStartDeviceIndex] = useState<number>(0)
   const [endDeviceIndex, setEndDeviceIndex] = useState<number>(0)
   const [isCalculatorOpen, setIsCalculatorOpen] = useState(false)
+  const [isNotificationOpen, setIsNotificationOpen] = useState(false)
   const [startDate, setStartDate] = useState<string>('')
   const [endDate, setEndDate] = useState<string>('')
 
@@ -68,50 +69,58 @@ export function FacilityCarbonCredits({ facilityId }: FacilityCarbonCreditsProps
     queryKey: ['facility-assessment-devices', facilityId],
     queryFn: async () => {
       try {
-        // Get latest assessment cycles for the facility
-        const cyclesResponse = await fetch(`/api/facility/${facilityId}/assessment-cycles`)
-        if (!cyclesResponse.ok) return []
-        const cyclesData = await cyclesResponse.json()
+        console.log('Fetching devices for facility:', facilityId)
         
-        if (!cyclesData.cycles || cyclesData.cycles.length === 0) {
-          return []
-        }
+        // Always return default devices first, then try to enhance with assessment data
+        let devices = [
+          { id: 'lighting', name: 'Lighting', type: 'default', powerW: '100', hoursPerDay: '12', kwhPerDay: 1.2, critical: false },
+          { id: 'vaccine-fridge', name: 'Vaccine Fridge', type: 'default', powerW: '150', hoursPerDay: '24', kwhPerDay: 3.6, critical: true },
+          { id: 'oxygen-concentrator', name: 'Oxygen Concentrator', type: 'default', powerW: '300', hoursPerDay: '8', kwhPerDay: 2.4, critical: true },
+          { id: 'autoclave', name: 'Autoclave', type: 'default', powerW: '2000', hoursPerDay: '1', kwhPerDay: 2.0, critical: false },
+          { id: 'ultrasound', name: 'Ultrasound', type: 'default', powerW: '500', hoursPerDay: '4', kwhPerDay: 2.0, critical: false },
+          { id: 'computers', name: 'Computers/ICT', type: 'default', powerW: '200', hoursPerDay: '8', kwhPerDay: 1.6, critical: false }
+        ]
         
-        // Get the latest cycle
-        const latestCycle = cyclesData.cycles[0]
-        
-        // Fetch energy assessment data for MEU (Major Energy Uses) devices
-        const energyResponse = await fetch(`/api/assessment-cycles/${latestCycle.id}/energy`)
-        let meuDevices = []
-        
-        if (energyResponse.ok) {
-          const energyData = await energyResponse.json()
-          if (energyData.stateJson?.meuRows) {
-            meuDevices = energyData.stateJson.meuRows.map((row: any, index: number) => ({
-              id: `meu-${index}`,
-              name: row.equipment || `Device ${index + 1}`,
-              type: 'energy-assessment',
-              powerW: row.powerW || '0',
-              hoursPerDay: row.hoursPerDay || '0',
-              kwhPerDay: row.kwhPerDay || 0,
-              critical: row.critical || false
-            }))
+        // Try to get assessment cycles for the facility
+        try {
+          const cyclesResponse = await fetch(`/api/facility/${facilityId}/assessment-cycles`)
+          if (cyclesResponse.ok) {
+            const cyclesData = await cyclesResponse.json()
+            console.log('Assessment cycles:', cyclesData)
+            
+            if (cyclesData.cycles && cyclesData.cycles.length > 0) {
+              // Get the latest cycle
+              const latestCycle = cyclesData.cycles[0]
+              console.log('Latest cycle:', latestCycle)
+              
+              // Fetch energy assessment data for MEU (Major Energy Uses) devices
+              const energyResponse = await fetch(`/api/assessment-cycles/${latestCycle.id}/energy`)
+              if (energyResponse.ok) {
+                const energyData = await energyResponse.json()
+                console.log('Energy assessment data:', energyData)
+                
+                if (energyData.stateJson?.meuRows && energyData.stateJson.meuRows.length > 0) {
+                  // Replace default devices with assessment devices
+                  devices = energyData.stateJson.meuRows.map((row: any, index: number) => ({
+                    id: `meu-${index}`,
+                    name: row.equipment || `Device ${index + 1}`,
+                    type: 'energy-assessment',
+                    powerW: row.powerW || '0',
+                    hoursPerDay: row.hoursPerDay || '0',
+                    kwhPerDay: row.kwhPerDay || 0,
+                    critical: row.critical || false
+                  }))
+                  console.log('Using assessment devices:', devices)
+                }
+              }
+            }
           }
+        } catch (assessmentError) {
+          console.log('Assessment data fetch failed, using default devices:', assessmentError)
         }
         
-        // If no energy assessment devices, create default devices based on common medical equipment
-        if (meuDevices.length === 0) {
-          meuDevices = [
-            { id: 'lighting', name: 'Lighting', type: 'default', powerW: '100', hoursPerDay: '12', kwhPerDay: 1.2, critical: false },
-            { id: 'vaccine-fridge', name: 'Vaccine Fridge', type: 'default', powerW: '150', hoursPerDay: '24', kwhPerDay: 3.6, critical: true },
-            { id: 'oxygen-concentrator', name: 'Oxygen Concentrator', type: 'default', powerW: '300', hoursPerDay: '8', kwhPerDay: 2.4, critical: true },
-            { id: 'autoclave', name: 'Autoclave', type: 'default', powerW: '2000', hoursPerDay: '1', kwhPerDay: 2.0, critical: false },
-            { id: 'ultrasound', name: 'Ultrasound', type: 'default', powerW: '500', hoursPerDay: '4', kwhPerDay: 2.0, critical: false },
-            { id: 'computers', name: 'Computers/ICT', type: 'default', powerW: '200', hoursPerDay: '8', kwhPerDay: 1.6, critical: false }
-          ]
-        }
-        
-        return meuDevices
+        console.log('Final devices to return:', devices)
+        return devices
       } catch (error) {
         console.error('Failed to fetch assessment devices:', error)
         // Return default devices on error
@@ -147,9 +156,8 @@ export function FacilityCarbonCredits({ facilityId }: FacilityCarbonCreditsProps
     queryFn: async (): Promise<CarbonCredit[]> => {
       const params = new URLSearchParams({
         facilityId,
-        ...(selectedDeviceIds && selectedDeviceIds !== 'all' && { deviceIds: selectedDeviceIds }),
+        ...(selectedDeviceIds && selectedDeviceIds !== 'all' && { deviceId: selectedDeviceIds }),
         ...(selectedPeriod && selectedPeriod !== 'all' && { period: selectedPeriod }),
-        ...(deviceSelectionMode && { deviceSelectionMode }),
         limit: '12'
       })
       
@@ -192,19 +200,8 @@ export function FacilityCarbonCredits({ facilityId }: FacilityCarbonCreditsProps
   }
 
   const handleCalculateCredits = () => {
-    if (!selectedDevice || selectedDevice === 'all' || !startDate || !endDate) {
-      toast.error('Please select device and date range')
-      return
-    }
-
-    calculateCreditsMutation.mutate({
-      facilityId,
-      deviceId: selectedDevice,
-      period: selectedPeriod,
-      startDate,
-      endDate,
-      gridEmissionFactor: 0.5 // Rwanda grid average
-    })
+    // Show custom modal notification instead of toast
+    setIsNotificationOpen(true)
   }
 
   const getStatusColor = (status: string) => {
@@ -427,27 +424,43 @@ export function FacilityCarbonCredits({ facilityId }: FacilityCarbonCreditsProps
             </div>
 
             {/* Device Selection Based on Mode */}
+            {/* Debug: Show device count */}
+            <div className="text-xs text-gray-500">
+              Debug: Found {assessmentDevices?.length || 0} devices, Loading: {devicesLoading ? 'Yes' : 'No'}
+            </div>
+            
             {deviceSelectionMode === 'all' && (
               <div className="text-sm text-gray-600">
                 <strong>All Devices:</strong> Carbon credits will be calculated for all assessment devices.
+                {assessmentDevices?.length > 0 && (
+                  <div className="mt-2 text-xs">
+                    Available: {assessmentDevices.map(d => d.name).join(', ')}
+                  </div>
+                )}
               </div>
             )}
 
             {deviceSelectionMode === 'single' && (
               <div className="space-y-2">
                 <Label className="text-sm font-medium">Select Device</Label>
-                <Select value={selectedDevice} onValueChange={setSelectedDevice}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Select device" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {assessmentDevices.map((device: any) => (
-                      <SelectItem key={device.id} value={device.id}>
-                        {device.name} {device.powerW && `(${device.powerW}W)`}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {devicesLoading ? (
+                  <div className="text-sm text-gray-500">Loading devices...</div>
+                ) : assessmentDevices?.length === 0 ? (
+                  <div className="text-sm text-red-500">No devices found. Please check assessment data.</div>
+                ) : (
+                  <Select value={selectedDevice} onValueChange={setSelectedDevice}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Select device" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {assessmentDevices.map((device: any) => (
+                        <SelectItem key={device.id} value={device.id}>
+                          {device.name} {device.powerW && `(${device.powerW}W)`}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
             )}
 
@@ -456,39 +469,45 @@ export function FacilityCarbonCredits({ facilityId }: FacilityCarbonCreditsProps
                 <div className="text-sm text-gray-600">
                   <strong>Interval Selection:</strong> Select a range of devices by index.
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-2">
-                    <Label className="text-sm font-medium">Start Index</Label>
-                    <Select value={startDeviceIndex.toString()} onValueChange={(value) => setStartDeviceIndex(parseInt(value))}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Start" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {assessmentDevices.map((_: any, index: number) => (
-                          <SelectItem key={index} value={index.toString()}>
-                            {index + 1}. {assessmentDevices[index].name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                {devicesLoading ? (
+                  <div className="text-sm text-gray-500">Loading devices...</div>
+                ) : assessmentDevices?.length === 0 ? (
+                  <div className="text-sm text-red-500">No devices found for interval selection.</div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">Start Index</Label>
+                      <Select value={startDeviceIndex.toString()} onValueChange={(value) => setStartDeviceIndex(parseInt(value))}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Start" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {assessmentDevices.map((_: any, index: number) => (
+                            <SelectItem key={index} value={index.toString()}>
+                              {index + 1}. {assessmentDevices[index].name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">End Index</Label>
+                      <Select value={endDeviceIndex.toString()} onValueChange={(value) => setEndDeviceIndex(parseInt(value))}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="End" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {assessmentDevices.map((_: any, index: number) => (
+                            <SelectItem key={index} value={index.toString()}>
+                              {index + 1}. {assessmentDevices[index].name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
-                  <div className="space-y-2">
-                    <Label className="text-sm font-medium">End Index</Label>
-                    <Select value={endDeviceIndex.toString()} onValueChange={(value) => setEndDeviceIndex(parseInt(value))}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="End" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {assessmentDevices.map((_: any, index: number) => (
-                          <SelectItem key={index} value={index.toString()}>
-                            {index + 1}. {assessmentDevices[index].name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                {startDeviceIndex <= endDeviceIndex && (
+                )}
+                {startDeviceIndex <= endDeviceIndex && assessmentDevices?.length > 0 && (
                   <div className="text-sm text-green-600">
                     Selected: {assessmentDevices.slice(startDeviceIndex, endDeviceIndex + 1).map(d => d.name).join(', ')}
                   </div>
@@ -589,6 +608,54 @@ export function FacilityCarbonCredits({ facilityId }: FacilityCarbonCreditsProps
           )}
         </CardContent>
       </Card>
+
+      {/* Custom Notification Modal */}
+      <Dialog open={isNotificationOpen} onOpenChange={setIsNotificationOpen}>
+        <DialogContent className="sm:max-w-[500px] border-green-200">
+          <div className="flex items-start gap-4">
+            <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0">
+              <Leaf className="w-6 h-6 text-green-600" />
+            </div>
+            <div className="flex-1">
+              <DialogHeader className="p-0">
+                <DialogTitle className="text-green-800">Carbon Credits Information</DialogTitle>
+                <DialogDescription className="text-green-700">
+                  This carbon credits module uses assessment estimates for demonstration purposes only.
+                </DialogDescription>
+              </DialogHeader>
+              
+              <div className="mt-4 space-y-3">
+                <div className="bg-green-50 p-3 rounded-lg">
+                  <h4 className="font-medium text-green-800 mb-1">What's Required for Real Carbon Credits:</h4>
+                  <ul className="text-sm text-green-700 space-y-1">
+                    <li>• Real-time energy generation data from smart meters</li>
+                    <li>• Grid interaction monitoring and tracking</li>
+                    <li>• Certified measurement equipment</li>
+                    <li>• Third-party verification capability</li>
+                  </ul>
+                </div>
+                
+                <div className="bg-amber-50 p-3 rounded-lg">
+                  <h4 className="font-medium text-amber-800 mb-1">Current System Status:</h4>
+                  <p className="text-sm text-amber-700">
+                    This is a simulation system demonstrating the carbon credit workflow. 
+                    Accurate calculations require hardware integration with real solar monitoring systems.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <DialogFooter className="mt-6">
+            <Button 
+              onClick={() => setIsNotificationOpen(false)}
+              className="bg-green-600 hover:bg-green-700 text-white"
+            >
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
