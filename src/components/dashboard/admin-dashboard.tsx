@@ -132,7 +132,6 @@ type SectionId =
   | 'afya-solar-invoice-requests'
   | 'afya-solar-meters'
   | 'afya-solar-reports'
-  | 'afya-solar-design'
   | 'solar-live-monitoring'
   | 'solar-analytics'
   | 'solar-alerts'
@@ -189,7 +188,6 @@ const navGroups: Record<
       { id: 'afya-solar-dashboard', label: 'Dashboard Overview', icon: BarChart3 },
       { id: 'afya-solar-packages', label: 'Package Management', icon: Package },
       { id: 'afya-solar-subscribers', label: 'Subscribers', icon: UserCheck },
-      { id: 'afya-solar-design', label: 'Design & Finance', icon: BarChart3 },
       { id: 'solar-alerts', label: 'Alerts & Notifications', icon: Bell },
       { id: 'solar-carbon-credits', label: 'Carbon Credits', icon: Leaf },
       { id: 'energy-assessment', label: 'Energy Assessment', icon: Gauge },
@@ -200,7 +198,7 @@ const navGroups: Record<
 
 // Helper to determine which group a section belongs to
 const getSectionGroup = (section: SectionId): NavGroup => {
-  if (['afya-solar-dashboard', 'afya-solar-packages', 'afya-solar-subscribers', 'afya-solar-design', 'solar-alerts', 'solar-carbon-credits', 'energy-assessment', 'climate-resilient'].includes(section)) {
+  if (['afya-solar-dashboard', 'afya-solar-packages', 'afya-solar-subscribers', 'solar-alerts', 'solar-carbon-credits', 'energy-assessment', 'climate-resilient'].includes(section)) {
     return 'afya-solar'
   }
   if (['notifications'].includes(section)) {
@@ -1097,10 +1095,6 @@ export function AdminDashboard({ initialSection = "overview" }: AdminDashboardPr
 
             {activeSection === 'afya-solar-subscribers' && (
               <AfyaSolarSubscribersManagement />
-            )}
-
-            {activeSection === 'afya-solar-design' && (
-              <AfyaSolarServiceManagement />
             )}
 
             {activeSection === 'solar-live-monitoring' && (
