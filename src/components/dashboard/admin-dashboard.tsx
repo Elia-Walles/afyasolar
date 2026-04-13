@@ -57,6 +57,7 @@ import {
   Thermometer,
   Gauge,
   Leaf,
+  CloudSun,
   FileText,
   Receipt,
   Monitor,
@@ -78,6 +79,8 @@ import AdminSolarMaintenance from "@/components/solar/admin-solar-maintenance"
 import AdminSolarPerformance from "@/components/solar/admin-solar-performance"
 import AdminSolarEnergyReports from "@/components/solar/admin-solar-energy-reports"
 import AdminSolarCarbonCredits from "@/components/solar/admin-solar-carbon-credits"
+import { EnergyEfficiencyAssessment } from "@/components/energy/energy-efficiency-assessment"
+import { ClimateResilienceAssessment } from "@/components/climate/climate-resilience-assessment"
 import { useComprehensiveFacilities, type ComprehensiveFacility } from "@/hooks/use-facilities"
 import { useFacilities } from "@/hooks/use-facilities"
 import type { Facility } from "@/types"
@@ -137,6 +140,8 @@ type SectionId =
   | 'solar-performance'
   | 'solar-energy-reports'
   | 'solar-carbon-credits'
+  | 'energy-assessment'
+  | 'climate-resilient'
   | 'transactions'
   | 'payment-transactions'
   | 'feature-requests'
@@ -187,13 +192,15 @@ const navGroups: Record<
       { id: 'afya-solar-design', label: 'Design & Finance', icon: BarChart3 },
       { id: 'solar-alerts', label: 'Alerts & Notifications', icon: Bell },
       { id: 'solar-carbon-credits', label: 'Carbon Credits', icon: Leaf },
+      { id: 'energy-assessment', label: 'Energy Assessment', icon: Gauge },
+      { id: 'climate-resilient', label: 'Climate Resilient', icon: CloudSun },
     ],
   },
 }
 
 // Helper to determine which group a section belongs to
 const getSectionGroup = (section: SectionId): NavGroup => {
-  if (['afya-solar-dashboard', 'afya-solar-packages', 'afya-solar-subscribers', 'afya-solar-design', 'solar-alerts', 'solar-carbon-credits'].includes(section)) {
+  if (['afya-solar-dashboard', 'afya-solar-packages', 'afya-solar-subscribers', 'afya-solar-design', 'solar-alerts', 'solar-carbon-credits', 'energy-assessment', 'climate-resilient'].includes(section)) {
     return 'afya-solar'
   }
   if (['notifications'].includes(section)) {
@@ -226,6 +233,10 @@ export function AdminDashboard({ initialSection = "overview" }: AdminDashboardPr
   const [expandedFacilities, setExpandedFacilities] = useState<Set<string>>(new Set())
   const [facilityQuickViewOpen, setFacilityQuickViewOpen] = useState(false)
   const [facilityQuickView, setFacilityQuickView] = useState<ComprehensiveFacility | null>(null)
+  
+  // Assessment facility selection states
+  const [energyAssessmentFacility, setEnergyAssessmentFacility] = useState<string>('')
+  const [climateResilientFacility, setClimateResilientFacility] = useState<string>('')
   const bookingFacilities: any[] = []
   const bookingFacilitiesLoading = false
   const refetchBookingFacilities = async () => {}
@@ -1118,6 +1129,127 @@ export function AdminDashboard({ initialSection = "overview" }: AdminDashboardPr
 
             {activeSection === 'solar-carbon-credits' && (
               <AdminSolarCarbonCredits />
+            )}
+
+            {activeSection === 'energy-assessment' && (
+              <div className="space-y-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Gauge className="w-5 h-5 text-green-600" />
+                      Energy Assessment
+                    </CardTitle>
+                    <CardDescription>
+                      Perform energy efficiency assessments for any facility in the system.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {/* Facility Selection */}
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">Select Facility</Label>
+                      <Select value={energyAssessmentFacility} onValueChange={setEnergyAssessmentFacility}>
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Choose a facility to assess...">
+                            {isLoading && (
+                              <div className="flex items-center gap-2">
+                                <div className="w-4 h-4 border-2 border-green-600 border-t-transparent rounded-full animate-spin" />
+                                <span>Loading facilities...</span>
+                              </div>
+                            )}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {facilities?.map((facility) => (
+                            <SelectItem key={facility.id} value={facility.id}>
+                              <div className="flex flex-col">
+                                <span className="font-medium">{facility.name}</span>
+                                <span className="text-xs text-gray-500">{facility.city}, {facility.region}</span>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {facilities?.length === 0 && !isLoading && (
+                        <p className="text-sm text-gray-500">No facilities found. Please ensure facilities are registered in the system.</p>
+                      )}
+                    </div>
+
+                    {/* Assessment Content */}
+                    {energyAssessmentFacility && (
+                      <div className="border border-gray-200 rounded-lg p-4">
+                        <p className="text-sm text-gray-600 mb-4">
+                          Performing energy efficiency assessment for: 
+                          <strong> {facilities?.find(f => f.id === energyAssessmentFacility)?.name}</strong>
+                        </p>
+                        <EnergyEfficiencyAssessment />
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+
+            {activeSection === 'climate-resilient' && (
+              <div className="space-y-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <CloudSun className="w-5 h-5 text-blue-600" />
+                      Climate Resilient Assessment
+                    </CardTitle>
+                    <CardDescription>
+                      Perform climate resilience assessments for any facility in the system.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {/* Facility Selection */}
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">Select Facility</Label>
+                      <Select value={climateResilientFacility} onValueChange={setClimateResilientFacility}>
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Choose a facility to assess...">
+                            {isLoading && (
+                              <div className="flex items-center gap-2">
+                                <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                                <span>Loading facilities...</span>
+                              </div>
+                            )}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {facilities?.map((facility) => (
+                            <SelectItem key={facility.id} value={facility.id}>
+                              <div className="flex flex-col">
+                                <span className="font-medium">{facility.name}</span>
+                                <span className="text-xs text-gray-500">{facility.city}, {facility.region}</span>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {facilities?.length === 0 && !isLoading && (
+                        <p className="text-sm text-gray-500">No facilities found. Please ensure facilities are registered in the system.</p>
+                      )}
+                    </div>
+
+                    {/* Assessment Content */}
+                    {climateResilientFacility && (
+                      <div className="border border-gray-200 rounded-lg p-4">
+                        <p className="text-sm text-gray-600 mb-4">
+                          Performing climate resilience assessment for: 
+                          <strong> {facilities?.find(f => f.id === climateResilientFacility)?.name}</strong>
+                        </p>
+                        <ClimateResilienceAssessment 
+                          facilityId={climateResilientFacility}
+                          onCapacityScoreChange={(score) => {
+                            console.log('Climate resilience capacity score for facility', climateResilientFacility, ':', score)
+                          }}
+                        />
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
             )}
 
             {/* Device Requests */}
