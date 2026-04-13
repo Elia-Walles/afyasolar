@@ -55,29 +55,101 @@ export function FacilityCarbonCredits({ facilityId }: FacilityCarbonCreditsProps
   // Radix SelectItem disallows empty string values; use 'all' sentinel.
   const [selectedDevice, setSelectedDevice] = useState<string>('all')
   const [selectedPeriod, setSelectedPeriod] = useState<string>('monthly')
+  const [deviceSelectionMode, setDeviceSelectionMode] = useState<'all' | 'single' | 'interval'>('all')
+  const [selectedDevicesList, setSelectedDevicesList] = useState<string[]>([])
+  const [startDeviceIndex, setStartDeviceIndex] = useState<number>(0)
+  const [endDeviceIndex, setEndDeviceIndex] = useState<number>(0)
   const [isCalculatorOpen, setIsCalculatorOpen] = useState(false)
   const [startDate, setStartDate] = useState<string>('')
   const [endDate, setEndDate] = useState<string>('')
 
-  // Fetch facility devices
-  const { data: devices = [] } = useQuery({
-    queryKey: ['facility-devices', facilityId],
+  // Fetch facility devices from assessments (not real devices)
+  const { data: assessmentDevices = [], isLoading: devicesLoading } = useQuery({
+    queryKey: ['facility-assessment-devices', facilityId],
     queryFn: async () => {
-      const response = await fetch(`/api/devices?facilityId=${facilityId}`)
-      if (!response.ok) throw new Error('Failed to fetch devices')
-      const data = await response.json()
-      return data.data || []
+      try {
+        // Get latest assessment cycles for the facility
+        const cyclesResponse = await fetch(`/api/facility/${facilityId}/assessment-cycles`)
+        if (!cyclesResponse.ok) return []
+        const cyclesData = await cyclesResponse.json()
+        
+        if (!cyclesData.cycles || cyclesData.cycles.length === 0) {
+          return []
+        }
+        
+        // Get the latest cycle
+        const latestCycle = cyclesData.cycles[0]
+        
+        // Fetch energy assessment data for MEU (Major Energy Uses) devices
+        const energyResponse = await fetch(`/api/assessment-cycles/${latestCycle.id}/energy`)
+        let devices = []
+        
+        if (energyResponse.ok) {
+          const energyData = await energyResponse.json()
+          if (energyData.stateJson?.meuRows) {
+            devices = energyData.stateJson.meuRows.map((row: any, index: number) => ({
+              id: `meu-${index}`,
+              name: row.equipment || `Device ${index + 1}`,
+              type: 'energy-assessment',
+              powerW: row.powerW || '0',
+              hoursPerDay: row.hoursPerDay || '0',
+              kwhPerDay: row.kwhPerDay || 0,
+              critical: row.critical || false
+            }))
+          }
+        }
+        
+        // If no energy assessment devices, create default devices based on common medical equipment
+        if (devices.length === 0) {
+          devices = [
+            { id: 'lighting', name: 'Lighting', type: 'default', powerW: '100', hoursPerDay: '12', kwhPerDay: 1.2, critical: false },
+            { id: 'vaccine-fridge', name: 'Vaccine Fridge', type: 'default', powerW: '150', hoursPerDay: '24', kwhPerDay: 3.6, critical: true },
+            { id: 'oxygen-concentrator', name: 'Oxygen Concentrator', type: 'default', powerW: '300', hoursPerDay: '8', kwhPerDay: 2.4, critical: true },
+            { id: 'autoclave', name: 'Autoclave', type: 'default', powerW: '2000', hoursPerDay: '1', kwhPerDay: 2.0, critical: false },
+            { id: 'ultrasound', name: 'Ultrasound', type: 'default', powerW: '500', hoursPerDay: '4', kwhPerDay: 2.0, critical: false },
+            { id: 'computers', name: 'Computers/ICT', type: 'default', powerW: '200', hoursPerDay: '8', kwhPerDay: 1.6, critical: false }
+          ]
+        }
+        
+        return devices
+      } catch (error) {
+        console.error('Failed to fetch assessment devices:', error)
+        // Return default devices on error
+        return [
+          { id: 'lighting', name: 'Lighting', type: 'default', powerW: '100', hoursPerDay: '12', kwhPerDay: 1.2, critical: false },
+          { id: 'vaccine-fridge', name: 'Vaccine Fridge', type: 'default', powerW: '150', hoursPerDay: '24', kwhPerDay: 3.6, critical: true },
+          { id: 'oxygen-concentrator', name: 'Oxygen Concentrator', type: 'default', powerW: '300', hoursPerDay: '8', kwhPerDay: 2.4, critical: true }
+        ]
+      }
     }
   })
 
+  // Get selected device IDs based on selection mode
+  const getSelectedDeviceIds = () => {
+    if (deviceSelectionMode === 'all') {
+      return 'all'
+    }
+    if (deviceSelectionMode === 'single') {
+      return selectedDevice
+    }
+    if (deviceSelectionMode === 'interval' && startDeviceIndex <= endDeviceIndex) {
+      const intervalDevices = assessmentDevices.slice(startDeviceIndex, endDeviceIndex + 1)
+      return intervalDevices.map(d => d.id).join(',')
+    }
+    return 'all'
+  }
+
+  const selectedDeviceIds = getSelectedDeviceIds()
+
   // Fetch carbon credits
   const { data: carbonCredits = [], isLoading, refetch } = useQuery({
-    queryKey: ['facility-carbon-credits', facilityId, selectedDevice, selectedPeriod],
+    queryKey: ['facility-carbon-credits', facilityId, selectedDeviceIds, selectedPeriod, deviceSelectionMode],
     queryFn: async (): Promise<CarbonCredit[]> => {
       const params = new URLSearchParams({
         facilityId,
-        ...(selectedDevice && selectedDevice !== 'all' && { deviceId: selectedDevice }),
+        ...(selectedDeviceIds && selectedDeviceIds !== 'all' && { deviceIds: selectedDeviceIds }),
         ...(selectedPeriod && selectedPeriod !== 'all' && { period: selectedPeriod }),
+        ...(deviceSelectionMode && { deviceSelectionMode }),
         limit: '12'
       })
       
@@ -338,23 +410,94 @@ export function FacilityCarbonCredits({ facilityId }: FacilityCarbonCreditsProps
           <CardTitle>Filters</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-col sm:flex-row gap-4">
-            <Select value={selectedDevice} onValueChange={setSelectedDevice}>
-              <SelectTrigger className="w-48">
-                <SelectValue placeholder="All Devices" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Devices</SelectItem>
-                {devices.map((device: any) => (
-                  <SelectItem key={device.id} value={device.id}>
-                    {device.name || device.serialNumber}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="flex flex-col gap-4">
+            {/* Device Selection Mode */}
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Device Selection Mode</Label>
+              <Select value={deviceSelectionMode} onValueChange={(value: 'all' | 'single' | 'interval') => setDeviceSelectionMode(value)}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select device mode" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Devices</SelectItem>
+                  <SelectItem value="single">One by One</SelectItem>
+                  <SelectItem value="interval">Interval Selection</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Device Selection Based on Mode */}
+            {deviceSelectionMode === 'all' && (
+              <div className="text-sm text-gray-600">
+                <strong>All Devices:</strong> Carbon credits will be calculated for all assessment devices.
+              </div>
+            )}
+
+            {deviceSelectionMode === 'single' && (
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">Select Device</Label>
+                <Select value={selectedDevice} onValueChange={setSelectedDevice}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select device" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {assessmentDevices.map((device: any) => (
+                      <SelectItem key={device.id} value={device.id}>
+                        {device.name} {device.powerW && `(${device.powerW}W)`}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {deviceSelectionMode === 'interval' && (
+              <div className="space-y-3">
+                <div className="text-sm text-gray-600">
+                  <strong>Interval Selection:</strong> Select a range of devices by index.
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium">Start Index</Label>
+                    <Select value={startDeviceIndex.toString()} onValueChange={(value) => setStartDeviceIndex(parseInt(value))}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Start" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {assessmentDevices.map((_: any, index: number) => (
+                          <SelectItem key={index} value={index.toString()}>
+                            {index + 1}. {assessmentDevices[index].name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium">End Index</Label>
+                    <Select value={endDeviceIndex.toString()} onValueChange={(value) => setEndDeviceIndex(parseInt(value))}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="End" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {assessmentDevices.map((_: any, index: number) => (
+                          <SelectItem key={index} value={index.toString()}>
+                            {index + 1}. {assessmentDevices[index].name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                {startDeviceIndex <= endDeviceIndex && (
+                  <div className="text-sm text-green-600">
+                    Selected: {assessmentDevices.slice(startDeviceIndex, endDeviceIndex + 1).map(d => d.name).join(', ')}
+                  </div>
+                )}
+              </div>
+            )}
             
             <Select value={selectedPeriod} onValueChange={setSelectedPeriod}>
-              <SelectTrigger className="w-40">
+              <SelectTrigger className="w-full">
                 <SelectValue placeholder="All Periods" />
               </SelectTrigger>
               <SelectContent>
