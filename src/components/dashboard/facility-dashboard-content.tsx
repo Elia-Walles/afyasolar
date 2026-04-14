@@ -47,6 +47,7 @@ import { FacilityCarbonCredits } from "@/components/dashboard/facility-carbon-cr
 import { ManualTelemetryForm } from "@/components/energy/manual-telemetry-form"
 import { EnergyEfficiencyAssessment } from "@/components/energy/energy-efficiency-assessment"
 import { FacilityMeterEfficiencyDashboard } from "@/components/efficiency/facility-meter-efficiency-dashboard"
+import { SolarPackagesSelection } from "@/components/solar/solar-packages-selection"
 import type { SizingSummary, MeuSummary } from "@/components/solar/afya-solar-sizing-tool"
 import { FacilityIntelligencePlatform } from "@/components/intelligence/facility-intelligence-platform"
 import type { SectionScores } from "@/lib/intelligence/recommendations"
@@ -84,7 +85,7 @@ interface FacilityDashboardContentProps {
   onSectionChange?: (section: NavSection) => void
 }
 
-type NavSection = 'overview' | 'devices' | 'energy' | 'energy-efficiency' | 'climate-resilience' | 'bills-payment' | 'notifications' | 'report' | 'carbon-credits' | 'subscription' | 'settings'
+type NavSection = 'overview' | 'package-selection' | 'devices' | 'energy' | 'energy-efficiency' | 'climate-resilience' | 'bills-payment' | 'notifications' | 'report' | 'carbon-credits' | 'subscription' | 'settings'
 
 interface FacilityNotification {
   id: string
@@ -102,6 +103,7 @@ interface FacilityNotification {
 
 const navItems: { id: NavSection; label: string; icon: React.ElementType }[] = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+  { id: 'package-selection', label: 'Package Selection', icon: Gift },
   { id: 'devices', label: 'Devices', icon: Plug },
   { id: 'energy', label: 'Energy', icon: Zap },
   { id: 'energy-efficiency', label: 'Energy Efficiency', icon: Gauge },
@@ -1106,6 +1108,12 @@ export function FacilityDashboardContent({
 
               {/* Facility self-service widgets intentionally hidden for now */}
             </>)}
+
+            {currentActiveSection === 'package-selection' && (
+              <div className="space-y-6">
+                {facilityId && <SolarPackagesSelection facilityId={facilityId} />}
+              </div>
+            )}
 
             {currentActiveSection === 'devices' && (
               <Card className={panelCardClass}>

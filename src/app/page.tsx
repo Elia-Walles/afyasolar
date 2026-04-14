@@ -20,7 +20,7 @@ export default async function Home() {
       redirect("/dashboard/management-panel")
     }
     if (role === "facility") {
-      redirect(FACILITY_SOLAR_ROUTE)
+      redirect("/dashboard/facility")
     }
     if (role === "admin") {
       redirect("/dashboard/admin")
