@@ -22,10 +22,6 @@ import {
 import { formatCurrency, cn } from "@/lib/utils"
 import { ServiceAccessPaymentDialog } from "@/components/services/service-access-payment-dialog"
 import { useRouter } from "next/navigation"
-import type { SizingSummary, MeuSummary } from "@/components/solar/afya-solar-sizing-tool"
-import { FacilityIntelligencePlatform } from "@/components/intelligence/facility-intelligence-platform"
-import type { SectionScores } from "@/lib/intelligence/recommendations"
-import { LogoutButton } from "@/components/logout-button"
 
 export interface SolarPackage {
   id: string | number  // Support both string (legacy) and number (new) IDs
@@ -98,11 +94,6 @@ export function SolarPackagesSelection({ facilityId, onPackageSelected }: SolarP
   const [selectedPackage, setSelectedPackage] = useState<string | null>(null)
   const [selectedPaymentPlan, setSelectedPaymentPlan] = useState<"cash" | "installment" | "paas">("cash")
   const [showPaymentDialog, setShowPaymentDialog] = useState(false)
-  const [sizingSummary, setSizingSummary] = useState<SizingSummary | null>(null)
-  const [meuSummary, setMeuSummary] = useState<MeuSummary | null>(null)
-  const [bmiSummary, setBmiSummary] = useState<{ score: number | null; bmiPercent: number | null } | null>(null)
-  const [sectionScores, setSectionScores] = useState<SectionScores | null>(null)
-  const reportRef = useRef<HTMLDivElement | null>(null)
 
   const recommendedPackages = useMemo(
     () =>
@@ -288,59 +279,24 @@ export function SolarPackagesSelection({ facilityId, onPackageSelected }: SolarP
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-blue-50 py-8 px-4">
-      <div className="max-w-7xl mx-auto">
-        {/* Top actions: Back + Logout */}
-        <div className="mb-6 flex items-center justify-between gap-3">
-          <Button
-            variant="outline"
-            onClick={() => router.push("/services/afya-solar")}
-            className="flex items-center gap-2 text-sm hover:bg-emerald-50 hover:border-emerald-300 hover:text-emerald-700"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Back to Services
-          </Button>
-          <LogoutButton
-            variant="outline"
-            showTextOnMobile
-            className="text-sm border-red-200 text-red-600 hover:text-red-700 hover:border-red-300"
-            title="Logout from Afya Solar"
-          />
-        </div>
-
-        {/* Header with Logo - Compact when package selected */}
-        <div className={cn("text-center transition-all duration-300", selectedPackage ? "mb-6" : "mb-12")}>
-          <div className="flex flex-col items-center justify-center mb-4">
-            <div className={cn(
-              "relative rounded-full overflow-hidden border-4 border-emerald-200 bg-white shadow-lg transition-all duration-300",
-              selectedPackage ? "w-16 h-16 mb-2" : "w-24 h-24 mb-4"
-            )}>
-              <Image
-                src="/images/services/logo.png"
-                alt="Ubuntu Afya Link"
-                fill
-                className="object-contain p-2"
-                priority
-              />
-            </div>
-            <div className="flex items-center justify-center gap-3 mb-2">
-              <Sun className={cn("text-emerald-600 transition-all", selectedPackage ? "h-6 w-6" : "h-10 w-10")} />
-              <h1 className={cn("font-bold text-gray-900 transition-all", selectedPackage ? "text-2xl" : "text-4xl")}>
-                Solar Power System Packages
-              </h1>
-            </div>
-          </div>
-          {!selectedPackage && (
-            <p className="text-lg text-gray-600 max-w-3xl mx-auto leading-relaxed">
-              Choose the perfect solar solution for your healthcare facility. All packages include professional installation, 
-              comprehensive warranty, and ongoing support to ensure reliable power for your operations.
-            </p>
-          )}
-        </div>
+    <div className="max-w-7xl mx-auto">
+      <div className="space-y-6">
 
         {/* SELECTED PACKAGE VIEW - Shows details prominently when a package is selected */}
         {selectedPackage && pkg && (
           <div className="mb-8">
+            {/* Back Button */}
+            <div className="mb-4">
+              <Button
+                variant="outline"
+                onClick={() => setSelectedPackage(null)}
+                className="flex items-center gap-2 text-sm hover:bg-emerald-50 hover:border-emerald-300 hover:text-emerald-700"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                Back to Packages
+              </Button>
+            </div>
+            
             {/* Selected Package Header with Quick Info */}
             <Card className="border-2 border-emerald-300 shadow-xl bg-gradient-to-br from-white to-emerald-50/30 overflow-hidden">
               {/* Package Title Bar */}
@@ -604,12 +560,6 @@ export function SolarPackagesSelection({ facilityId, onPackageSelected }: SolarP
                 <p className="text-gray-600 mb-6">
                   There are currently no solar packages configured. Please contact the administrator to set up package options.
                 </p>
-                <Button
-                  onClick={() => router.push("/services/afya-solar")}
-                  className="bg-emerald-600 hover:bg-emerald-700"
-                >
-                  Back to Services
-                </Button>
               </div>
             ) : (
               <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
@@ -683,405 +633,6 @@ export function SolarPackagesSelection({ facilityId, onPackageSelected }: SolarP
             )}
           </>
         )}
-
-        {/* Assessment & planning tools */}
-        <div className="mt-12 mb-10">
-          <div className="max-w-3xl mx-auto text-center mb-6">
-            <h2 className="text-2xl font-semibold text-gray-900">
-              Plan your Afya Solar system
-            </h2>
-            <p className="mt-2 text-sm sm:text-base text-gray-600">
-              AfyaSolar Intelligence: assess loads and operations, view charts, and export a subscription-ready PDF before
-              you choose a package.
-            </p>
-          </div>
-
-          <FacilityIntelligencePlatform
-            facilityId={facilityId}
-            packages={recommendedPackages}
-            sizingSummary={sizingSummary}
-            meuSummary={meuSummary}
-            bmiSummary={bmiSummary}
-            sectionScores={sectionScores}
-            onSizingSummaryChange={setSizingSummary}
-            onMeuSummaryChange={setMeuSummary}
-            onBmiSummaryChange={setBmiSummary}
-            onSectionScoresChange={setSectionScores}
-          />
-
-          <Card className="border-emerald-100 bg-white/90 shadow-sm mt-8">
-                <CardHeader className="pb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                  <div>
-                    <CardTitle className="text-lg font-semibold text-gray-900">
-                      Solar Assessment Report
-                    </CardTitle>
-                    <CardDescription className="text-sm text-gray-600">
-                      Consolidated view of your major energy uses, recommended Afya Solar system, expected costs,
-                      and behavior &amp; management score.
-                    </CardDescription>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={async () => {
-                      try {
-                        const { jsPDF } = await import("jspdf")
-                        const doc = new jsPDF("p", "mm", "a4")
-                        const marginX = 15
-                        let cursorY = 20
-                        const lineHeight = 6
-                        const pageWidth = doc.internal.pageSize.getWidth()
-                        const contentWidth = pageWidth - marginX * 2
-
-                        const sanitize = (text: string) =>
-                          text
-                            .replace(/[\u2010-\u2015]/g, "-") // various dashes -> hyphen
-                            .replace(/[\u2018\u2019]/g, "'") // curly quotes -> straight
-                            .replace(/[\u201C\u201D]/g, '"')
-                            .replace(/[^\x00-\x7F]/g, " ") // strip other non-ASCII
-
-                        const addSection = (title: string, body: string[]) => {
-                          if (cursorY > 270) {
-                            doc.addPage()
-                            cursorY = 20
-                          }
-                          // Section heading in brand green
-                          doc.setFontSize(12)
-                          doc.setFont("times", "bold")
-                          doc.setTextColor(15, 118, 110) // emerald-like green
-                          doc.text(sanitize(title), marginX, cursorY)
-                          cursorY += lineHeight
-
-                          // Body text in black
-                          doc.setFontSize(10)
-                          doc.setFont("times", "normal")
-                          doc.setTextColor(0, 0, 0)
-                          body.forEach((paragraph) => {
-                            const lines = doc.splitTextToSize(sanitize(paragraph), contentWidth)
-                            lines.forEach((line: string) => {
-                              if (cursorY > 280) {
-                                doc.addPage()
-                                cursorY = 20
-                              }
-                              doc.text(line, marginX, cursorY)
-                              cursorY += lineHeight
-                            })
-                            cursorY += 2
-                          })
-                          cursorY += 2
-                        }
-
-                        // Header / branding
-                        const today = new Date().toLocaleDateString(undefined, {
-                          year: "numeric",
-                          month: "short",
-                          day: "numeric",
-                        } as any)
-
-                        doc.setFont("times", "bold")
-                        doc.setFontSize(18)
-                        doc.text("Ubuntu Afya Link", pageWidth / 2, cursorY, { align: "center" })
-                        cursorY += lineHeight
-
-                        doc.setFontSize(14)
-                        doc.text("Afya Solar Assessment Report", pageWidth / 2, cursorY, { align: "center" })
-                        cursorY += lineHeight + 1
-
-                        doc.setFont("times", "normal")
-                        doc.setFontSize(9)
-                        doc.text(`Generated on: ${today}`, marginX, cursorY)
-                        cursorY += lineHeight
-                        doc.text(
-                          "Service: Afya Solar – clean, reliable power for healthcare facilities.",
-                          marginX,
-                          cursorY
-                        )
-                        cursorY += lineHeight + 2
-
-                        // Thin separator line
-                        doc.setDrawColor(200)
-                        doc.setLineWidth(0.3)
-                        doc.line(marginX, cursorY, pageWidth - marginX, cursorY)
-                        cursorY += lineHeight
-
-                        // Intro / service description
-                        addSection("ABOUT AFYA SOLAR & UBUNTU AFYA LINK", [
-                          "Afya Solar is an Ubuntu Afya Link service that designs, finances and operates solar power systems tailored to healthcare facilities. It combines system design, high‑quality components, professional installation and ongoing support.",
-                          "A typical Afya Solar package includes PV modules, inverters, batteries, protection and monitoring equipment, plus commissioning and a 2‑year warranty with technical support.",
-                          "This assessment report summarizes your estimated energy demand, major energy uses, indicative system size, expected cost savings, and a behavior & management index to help you make an informed subscription decision.",
-                        ])
-
-                        if (sizingSummary) {
-                          addSection("SYSTEM DEMAND & SIZING", [
-                            `Estimated total daily energy demand: ${sizingSummary.totalDailyLoad.toFixed(
-                              1
-                            )} kWh/day. This corresponds to an indicative Afya Solar array size of ${sizingSummary.solarArraySize.toFixed(
-                              1
-                            )} kW.`,
-                            `Largest standard Afya Solar package in the catalogue: approximately ${sizingSummary.maxPackageKw.toFixed(
-                              1
-                            )} kW.`,
-                          ])
-                        }
-
-                        if (meuSummary && meuSummary.totalDailyLoad > 0) {
-                          const topDevicesText =
-                            meuSummary.topDevices.length > 0
-                              ? "Top energy uses: " +
-                                meuSummary.topDevices
-                                  .map(
-                                    (d) =>
-                                      `${d.name} – ${d.dailyKwh.toFixed(1)} kWh/day (${d.shareOfTotal.toFixed(
-                                        0
-                                      )}% of total)`
-                                  )
-                                  .join("; ")
-                              : "No major devices identified yet."
-
-                          const ineffText =
-                            meuSummary.potentialInefficiencies.length > 0
-                              ? "Possible long-running or high-load devices: " +
-                                meuSummary.potentialInefficiencies
-                                  .slice(0, 3)
-                                  .map(
-                                    (d) =>
-                                      `${d.name} – ${d.dailyKwh.toFixed(1)} kWh/day (${d.shareOfTotal.toFixed(
-                                        0
-                                      )}% of total)`
-                                  )
-                                  .join("; ")
-                              : "No obvious long‑running or high‑load devices were flagged based on your inputs."
-
-                          addSection("MAJOR ENERGY USES", [
-                            `Your major energy uses account for a total of ${meuSummary.totalDailyLoad.toFixed(
-                              1
-                            )} kWh/day.`,
-                            topDevicesText,
-                            ineffText,
-                          ])
-                        }
-
-                        if (sizingSummary) {
-                          addSection("COST OUTLOOK", [
-                            `Current annual energy cost (grid or diesel): around ${formatCurrency(
-                              sizingSummary.annualGridCost > 0
-                                ? sizingSummary.annualGridCost
-                                : sizingSummary.annualDieselCost
-                            )}.`,
-                            `With Afya Solar (using the selected offset), the estimated annual savings are ${formatCurrency(
-                              sizingSummary.annualSavings
-                            )}, leaving an estimated remaining annual energy cost of ${formatCurrency(
-                              sizingSummary.remainingEnergyCost
-                            )}.`,
-                          ])
-                        }
-
-                        if (bmiSummary && bmiSummary.score !== null && bmiSummary.bmiPercent !== null) {
-                          addSection("BEHAVIOR & MANAGEMENT INDEX", [
-                            `Your 4‑point assessment score is ${bmiSummary.score}/40 (${bmiSummary.bmiPercent}%).`,
-                            "A higher Behavior & Management Index (BMI) means Afya Solar is more likely to perform as expected, because on‑site practices support efficient and reliable use of the system.",
-                          ])
-                        }
-
-                        if (sizingSummary) {
-                          if (sizingSummary.recommendedPackageName) {
-                            addSection("PACKAGE RECOMMENDATION", [
-                              `Based on your estimated demand and system sizing, the most suitable standard Afya Solar package is ${sizingSummary.recommendedPackageName}${
-                                sizingSummary.recommendedPackageKw
-                                  ? ` (${sizingSummary.recommendedPackageKw.toFixed(1)} kW)`
-                                  : ""
-                              }.`,
-                              `This package is the smallest standard option that can meet or exceed your required array size of ${sizingSummary.requiredKw.toFixed(
-                                1
-                              )} kW.`,
-                            ])
-                          } else if (sizingSummary.requiredKw > sizingSummary.maxPackageKw) {
-                            addSection("PACKAGE RECOMMENDATION", [
-                              `Your required array size is approximately ${sizingSummary.requiredKw.toFixed(
-                                1
-                              )} kW, which is larger than our biggest standard Afya Solar package (${sizingSummary.maxPackageKw.toFixed(
-                                1
-                              )} kW).`,
-                              "We recommend discussing a custom Afya Solar system sized around this capacity with the Afya Solar team.",
-                            ])
-                          } else {
-                            addSection("PACKAGE RECOMMENDATION", [
-                              "Complete the Solar Sizing & Cost Planner first to receive a data‑driven package recommendation.",
-                            ])
-                          }
-                        }
-
-                        // Contact / footer
-                        addSection("UBUNTU AFYA LINK CONTACT", [
-                          "Ubuntu Afya Link – Afya Solar team",
-                          "Phone/WhatsApp: +255 656 721 324",
-                          "Email: info@ubuntuafyalink.co.tz",
-                          "Website: www.ubunutafyalink.co.tz",
-                          "For detailed engineering design, financing options and implementation timelines, please contact the Afya Solar team using the details above.",
-                        ])
-
-                        doc.save("afya-solar-assessment-report.pdf")
-                      } catch (err) {
-                        console.error("Failed to generate Afya Solar assessment PDF", err)
-                      }
-                    }}
-                  >
-                    Download as PDF
-                  </Button>
-                </CardHeader>
-                <CardContent className="pt-2">
-                  <div ref={reportRef} className="space-y-6 text-sm text-gray-800">
-                  {!sizingSummary && !meuSummary && !bmiSummary && (
-                    <p className="text-xs sm:text-sm text-gray-500">
-                      Use <span className="font-semibold">Assess</span> in AfyaSolar Intelligence above (devices and
-                      operational checklist) to generate a full report.
-                    </p>
-                  )}
-
-                  {sizingSummary && (
-                    <section className="space-y-2">
-                      <h3 className="text-sm font-semibold text-gray-900">1. System demand &amp; sizing</h3>
-                      <p>
-                        Based on your inputs, your estimated total daily energy demand is{" "}
-                        <span className="font-semibold">
-                          {sizingSummary.totalDailyLoad.toFixed(1)} kWh/day
-                        </span>
-                        , which translates to an indicative Afya Solar array size of{" "}
-                        <span className="font-semibold">
-                          {sizingSummary.solarArraySize.toFixed(1)} kW
-                        </span>
-                        .
-                      </p>
-                      <p>
-                        The largest standard package in the catalogue is approximately{" "}
-                        <span className="font-semibold">
-                          {sizingSummary.maxPackageKw.toFixed(1)} kW
-                        </span>
-                        .
-                      </p>
-                    </section>
-                  )}
-
-                  {meuSummary && meuSummary.totalDailyLoad > 0 && (
-                    <section className="space-y-2">
-                      <h3 className="text-sm font-semibold text-gray-900">2. Major energy uses</h3>
-                      <p>
-                        Your major energy uses account for a total of{" "}
-                        <span className="font-semibold">
-                          {meuSummary.totalDailyLoad.toFixed(1)} kWh/day
-                        </span>
-                        . The top contributors are:
-                      </p>
-                      <ul className="list-disc list-inside space-y-0.5">
-                        {meuSummary.topDevices.map((d) => (
-                          <li key={d.id}>
-                            <span className="font-medium">{d.name}</span> –{" "}
-                            {d.dailyKwh.toFixed(1)} kWh/day (
-                            {d.shareOfTotal.toFixed(0)}% of total)
-                          </li>
-                        ))}
-                      </ul>
-                      {meuSummary.potentialInefficiencies.length > 0 && (
-                        <p className="text-xs text-gray-700">
-                          Some devices appear to be long‑running or high‑load (e.g.{" "}
-                          {meuSummary.potentialInefficiencies
-                            .slice(0, 3)
-                            .map((d) => `${d.name} (${d.dailyKwh.toFixed(1)} kWh/day)`)
-                            .join(", ")}
-                          ). Consider operational changes or efficiency upgrades here.
-                        </p>
-                      )}
-                    </section>
-                  )}
-
-                  {sizingSummary && (
-                    <section className="space-y-2">
-                      <h3 className="text-sm font-semibold text-gray-900">3. Cost outlook</h3>
-                      <p>
-                        Your current annual energy cost is approximately{" "}
-                        <span className="font-semibold">
-                          {formatCurrency(
-                            sizingSummary.annualGridCost > 0
-                              ? sizingSummary.annualGridCost
-                              : sizingSummary.annualDieselCost
-                          )}
-                        </span>
-                        . With Afya Solar (based on the chosen offset), the estimated annual savings are{" "}
-                        <span className="font-semibold">
-                          {formatCurrency(sizingSummary.annualSavings)}
-                        </span>
-                        , leaving a remaining annual energy cost of{" "}
-                        <span className="font-semibold">
-                          {formatCurrency(sizingSummary.remainingEnergyCost)}
-                        </span>
-                        .
-                      </p>
-                    </section>
-                  )}
-
-                  {bmiSummary && bmiSummary.score !== null && bmiSummary.bmiPercent !== null && (
-                    <section className="space-y-2">
-                      <h3 className="text-sm font-semibold text-gray-900">4. Behavior &amp; management index</h3>
-                      <p>
-                        Your 4‑point assessment score is{" "}
-                        <span className="font-semibold">
-                          {bmiSummary.score}/40 ({bmiSummary.bmiPercent}%)
-                        </span>
-                        , indicating your current level of good energy‑efficiency practices in reliability,
-                        wastage, thermal efficiency, and staff behavior.
-                      </p>
-                      <p className="text-xs text-gray-700">
-                        A higher BMI means Afya Solar is more likely to perform as expected because on‑site
-                        practices support efficient use of the system.
-                      </p>
-                    </section>
-                  )}
-
-                  {sizingSummary && (
-                    <section className="space-y-2">
-                      <h3 className="text-sm font-semibold text-gray-900">5. Package recommendation</h3>
-                      {sizingSummary.recommendedPackageName ? (
-                        <p>
-                          Based on your estimated demand and system sizing, the most suitable standard Afya
-                          Solar package is{" "}
-                          <span className="font-semibold">
-                            {sizingSummary.recommendedPackageName}
-                            {sizingSummary.recommendedPackageKw
-                              ? ` (${sizingSummary.recommendedPackageKw.toFixed(1)} kW)`
-                              : ""}
-                          </span>
-                          . This package is the smallest standard option that can meet or exceed your
-                          required array size of{" "}
-                          <span className="font-semibold">
-                            {sizingSummary.requiredKw.toFixed(1)} kW
-                          </span>
-                          .
-                        </p>
-                      ) : sizingSummary.requiredKw > sizingSummary.maxPackageKw ? (
-                        <p>
-                          Your required array size is approximately{" "}
-                          <span className="font-semibold">
-                            {sizingSummary.requiredKw.toFixed(1)} kW
-                          </span>
-                          , which is larger than our biggest standard Afya Solar package (
-                          <span className="font-semibold">
-                            {sizingSummary.maxPackageKw.toFixed(1)} kW
-                          </span>
-                          ). We recommend discussing a{" "}
-                          <span className="font-semibold">custom Afya Solar system</span> sized around this
-                          capacity with the Afya Solar team.
-                        </p>
-                      ) : (
-                        <p className="text-xs text-gray-600">
-                          Complete the Solar Sizing &amp; Cost Planner first to receive a package recommendation.
-                        </p>
-                      )}
-                    </section>
-                  )}
-                  </div>
-                </CardContent>
-              </Card>
-        </div>
 
         {/* Payment Dialog */}
         {showPaymentDialog && pkg && (
