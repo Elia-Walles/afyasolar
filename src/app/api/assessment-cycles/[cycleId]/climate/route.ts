@@ -105,7 +105,15 @@ function computeTopRisks(normalized: Record<ModuleCode, number>) {
 }
 
 async function requireCycleAccess(session: any, cycleId: string) {
-  const [cycle] = await db.select().from(assessmentCycles).where(eq(assessmentCycles.id, cycleId)).limit(1)
+  const [cycle] = await db
+    .select({
+      id: assessmentCycles.id,
+      facilityId: assessmentCycles.facilityId,
+      status: assessmentCycles.status,
+    })
+    .from(assessmentCycles)
+    .where(eq(assessmentCycles.id, cycleId))
+    .limit(1)
   if (!cycle) return { error: NextResponse.json({ error: "Assessment cycle not found" }, { status: 404 }) as any }
 
   if (session.user.role !== "admin" && session.user.facilityId !== cycle.facilityId) {
@@ -144,6 +152,10 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
       db.select().from(climateScoreSummaries).where(eq(climateScoreSummaries.assessmentCycleId, cycleId)).limit(1),
       db.select().from(riskDrivers).where(eq(riskDrivers.assessmentCycleId, cycleId)).orderBy(riskDrivers.rank).limit(10),
     ])
+
+    // #region agent log
+    fetch('http://127.0.0.1:7272/ingest/c99fbffc-2c05-4b71-ad32-c7c14a4d90a6',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'af648d'},body:JSON.stringify({sessionId:'af648d',runId:'pre-fix',hypothesisId:'H3',location:'assessment-cycles/[cycleId]/climate/route.ts:GET',message:'API climate snapshot returned',data:{cycleId,facilityId:access.cycle.facilityId,responsesCount:responses.length,evidenceCount:evidence.length,hasScore:!!score[0],rcs:score[0]?.rcs ?? null,tier:score[0]?.tier ?? null,risksCount:risks.length},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
 
     return NextResponse.json({
       success: true,

@@ -208,6 +208,9 @@ export function AfyaSolarSizingTool({
   const [quoteLoading, setQuoteLoading] = useState(false)
   const [quoteError, setQuoteError] = useState<string | null>(null)
   const [quoteData, setQuoteData] = useState<QuoteApiResponse["data"] | null>(null)
+  const [saveDbLoading, setSaveDbLoading] = useState(false)
+  const [saveDbError, setSaveDbError] = useState<string | null>(null)
+  const [saveDbSuccessAt, setSaveDbSuccessAt] = useState<number | null>(null)
 
   const dbHydratedRef = useRef(false)
 
@@ -300,6 +303,103 @@ export function AfyaSolarSizingTool({
     }
   }, [])
 
+  // Load previous assessment from database on mount
+  useEffect(() => {
+    // When a specific assessment cycle is selected, cycle-scoped hydration must remain the source of truth.
+    if (assessmentCycleId) return
+    if (!facilityId || dbHydratedRef.current) return
+
+    const loadPreviousAssessment = async () => {
+      try {
+        const res = await fetch(`/api/afya-solar/design/latest?facilityId=${facilityId}`)
+        if (!res.ok) return
+        const json = await res.json()
+        if (!json.success || !json.data) return
+
+        const payload = json.data.payloadJson
+        if (!payload || !payload.input) return
+
+        const input = payload.input
+        if (input.devices && Array.isArray(input.devices) && input.devices.length > 0) {
+          setDevices(
+            input.devices.map((d: any) => ({
+              ...emptyDevice(String(Math.random())),
+              deviceName: d.device_name || "",
+              wattage: d.wattage_w || 0,
+              quantity: d.quantity || 0,
+              hoursPerDay: d.hours_per_day || 0,
+              category: "other",
+              criticality: d.is_critical ? "critical" : "non-essential",
+              backupRequired: false,
+              room: "",
+            }))
+          )
+        }
+
+        if (input.facility) {
+          setFacilityData((prev) => ({
+            ...prev,
+            facilityType: input.facility.facility_type === "on_grid" ? "on-grid" : 
+                        input.facility.facility_type === "off_grid" ? "off-grid" : "hybrid",
+            averageOutageHours: input.facility.avg_outage_hours_per_day || 0,
+            monthlyGridBill: input.facility.tanesco_monthly_bill_tzs || 0,
+            dieselLitresPerDay: input.facility.diesel_litres_per_day || 0,
+            dieselPricePerLitre: input.facility.diesel_price_tzs_per_litre || 0,
+          }))
+        }
+
+        if (payload.clientContext?.solarOffset) {
+          setSolarOffset(payload.clientContext.solarOffset)
+        }
+
+        // Restore quote data if available
+        if (payload.result) {
+          const result = payload.result
+          setQuoteData({
+            load_analysis: {
+              total_daily_energy_kwh: result.load?.E_day_total || 0,
+              critical_energy_kwh: result.load?.E_day_critical || 0,
+              total_daily_energy_adjusted_kwh: result.load?.E_day_total_adj || 0,
+              critical_energy_adjusted_kwh: result.load?.E_day_critical_adj || 0,
+            },
+            system_design: {
+              pv_system_size_kw: result.pv?.P_pv_actual_kw || 0,
+              number_of_620w_panels: result.pv?.panels_required || 0,
+              battery_capacity_kwh: result.battery?.E_battery_nameplate || 0,
+              battery_ah_at_system_voltage: result.battery?.battery_Ah || 0,
+              recommended_inverter_kw: result.inverter?.inverter_continuous_kw || 0,
+              mppt_current_a: result.mppt?.I_mppt || 0,
+            },
+            solar_production: {
+              estimated_daily_solar_generation_kwh: result.pv?.solar_energy_daily || 0,
+            },
+            current_energy_cost: {
+              grid_cost_monthly_tzs: input.facility?.tanesco_monthly_bill_tzs || 0,
+              diesel_cost_monthly_tzs: result.baseline?.diesel_cost_monthly || 0,
+              total_baseline_cost_monthly_tzs: result.baseline?.baseline_cost_monthly || 0,
+            },
+            after_solar_cost: {
+              grid_cost_after_monthly_tzs: result.afterSolar?.grid_after_monthly || 0,
+              diesel_cost_after_monthly_tzs: result.afterSolar?.diesel_after_monthly || 0,
+              total_cost_after_solar_monthly_tzs: result.afterSolar?.total_after_solar_monthly || 0,
+            },
+            monthly_savings: {
+              gross_monthly_savings_tzs: result.savings?.gross_monthly_savings || 0,
+            },
+            financing_comparison: result.financing || null,
+          })
+          setActiveTab("cost")
+        }
+
+        dbHydratedRef.current = true
+      } catch (error) {
+        console.error("Error loading previous assessment:", error)
+      }
+    }
+
+    loadPreviousAssessment()
+  }, [facilityId, assessmentCycleId])
+
   const calculateEnergy = (): Calculations => {
     const totalDailyLoad = devices.reduce((sum, device) => {
       return sum + (device.wattage * device.quantity * device.hoursPerDay) / 1000
@@ -377,6 +477,22 @@ export function AfyaSolarSizingTool({
 
     return { recommended: firstEnough, requiredKw, maxKw }
   }, [packages, calculations.totalDailyLoad, calculations.solarArraySize])
+
+  const currentSizingSummary: SizingSummary = useMemo(() => {
+    const recommended = sizingSuggestion.recommended
+    return {
+      totalDailyLoad: calculations.totalDailyLoad,
+      solarArraySize: calculations.solarArraySize,
+      annualGridCost: calculations.annualGridCost,
+      annualDieselCost: calculations.annualDieselCost,
+      annualSavings: calculations.annualSavings,
+      remainingEnergyCost: calculations.remainingEnergyCost,
+      requiredKw: sizingSuggestion.requiredKw,
+      maxPackageKw: sizingSuggestion.maxKw,
+      recommendedPackageName: recommended?.pkg.name ?? null,
+      recommendedPackageKw: recommended?.kw ?? null,
+    }
+  }, [calculations, sizingSuggestion])
 
   // Compute MEU (Major Energy Uses) summary for reporting and UI
   const meuSummary: MeuSummary = useMemo(() => {
@@ -701,6 +817,52 @@ export function AfyaSolarSizingTool({
       setQuoteData(null)
     } finally {
       setQuoteLoading(false)
+    }
+  }
+
+  const saveAssessmentToDatabase = async () => {
+    if (!facilityId) {
+      setSaveDbError("Facility is required before saving.")
+      return
+    }
+    if (!quoteData) {
+      setSaveDbError("Run Design & Finance Engine first, then save.")
+      return
+    }
+
+    setSaveDbLoading(true)
+    setSaveDbError(null)
+    try {
+      const res = await fetch(`/api/facility/${facilityId}/assessment-reports`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sourceVersion: "3.0",
+          assessmentCycleId: assessmentCycleId ?? null,
+          energy: {
+            facilityId,
+            facilityName: facilityName ?? null,
+            assessmentCycleId: assessmentCycleId ?? null,
+            devices,
+            facilityData,
+            calculations,
+            sizingSummary: currentSizingSummary,
+            meuSummary,
+            solarOffset,
+            systemCost,
+            quoteData,
+          },
+        }),
+      })
+      const json = await res.json().catch(() => ({} as any))
+      if (!res.ok || !json?.success) {
+        throw new Error((json as any)?.error || "Failed to save assessment to database")
+      }
+      setSaveDbSuccessAt(Date.now())
+    } catch (error: any) {
+      setSaveDbError(error?.message || "Unexpected error while saving assessment.")
+    } finally {
+      setSaveDbLoading(false)
     }
   }
 
@@ -1167,6 +1329,10 @@ export function AfyaSolarSizingTool({
                   {quoteError}
                 </span>
               )}
+              {saveDbError && <span className="text-[11px] text-red-600 max-w-xs truncate">{saveDbError}</span>}
+              {saveDbSuccessAt && !saveDbError && (
+                <span className="text-[11px] text-emerald-700 max-w-xs truncate">Saved to database.</span>
+              )}
               <Button
                 size="sm"
                 className="bg-gradient-to-r from-emerald-600 to-green-500 hover:from-emerald-700 hover:to-green-600 text-white font-semibold shadow-sm hover:shadow-md px-4 py-2 text-xs sm:text-sm"
@@ -1174,6 +1340,15 @@ export function AfyaSolarSizingTool({
                 disabled={quoteLoading}
               >
                 {quoteLoading ? "Running design..." : "Run Design & Finance Engine"}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-emerald-300 text-emerald-800"
+                onClick={saveAssessmentToDatabase}
+                disabled={saveDbLoading || !quoteData}
+              >
+                {saveDbLoading ? "Saving..." : "Save to Database"}
               </Button>
             </div>
           </div>

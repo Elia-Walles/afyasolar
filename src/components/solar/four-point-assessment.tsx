@@ -90,6 +90,7 @@ export function FourPointAssessment({
   const [monitoringAssigned, setMonitoringAssigned] = useState<string>("")
   const [assessmentScore, setAssessmentScore] = useState<number | null>(null)
   const [assessmentError, setAssessmentError] = useState<string | null>(null)
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle")
   const [isCalculating, setIsCalculating] = useState(false)
   const [showScoreDialog, setShowScoreDialog] = useState(false)
 
@@ -196,32 +197,43 @@ export function FourPointAssessment({
     return [...entries].sort((a, b) => a.v - b.v).slice(0, 3)
   }, [sectionScoresLive])
 
+  const buildOperationsData = (): FourPointPersistedState => ({
+    outageHours,
+    batteryBackup,
+    ledPercent,
+    devicesOff,
+    acType,
+    insulation,
+    staffTraining,
+    monitoringAssigned,
+    assessmentScore,
+    openCard,
+    sectionScores: sectionScoresLive,
+  })
+
+  const persistOperationsData = async (showFeedback: boolean) => {
+    if (readOnly || !assessmentCycleId) return
+    if (showFeedback) setSaveStatus("saving")
+    try {
+      await fetch(`/api/assessment-cycles/${assessmentCycleId}/energy`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ operationsData: buildOperationsData() }),
+      })
+      if (showFeedback) {
+        setSaveStatus("saved")
+        window.setTimeout(() => setSaveStatus("idle"), 1500)
+      }
+    } catch {
+      if (showFeedback) setSaveStatus("error")
+    }
+  }
+
   useEffect(() => {
     if (readOnly) return
     if (!assessmentCycleId) return
     const t = window.setTimeout(async () => {
-      try {
-        const operationsData: FourPointPersistedState = {
-          outageHours,
-          batteryBackup,
-          ledPercent,
-          devicesOff,
-          acType,
-          insulation,
-          staffTraining,
-          monitoringAssigned,
-          assessmentScore,
-          openCard,
-          sectionScores: sectionScoresLive,
-        }
-        await fetch(`/api/assessment-cycles/${assessmentCycleId}/energy`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ operationsData }),
-        })
-      } catch {
-        // ignore
-      }
+      await persistOperationsData(false)
     }, 1000)
     return () => window.clearTimeout(t)
   }, [
@@ -468,17 +480,30 @@ export function FourPointAssessment({
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-1 border-t border-emerald-100">
         <div className="text-xs text-gray-600">
           {assessmentError && <span className="text-red-600">{assessmentError}</span>}
+          {!assessmentError && saveStatus === "saved" && <span className="text-emerald-700">BMI saved to database.</span>}
+          {!assessmentError && saveStatus === "error" && <span className="text-red-600">Failed to save BMI.</span>}
         </div>
-        <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={handleCalculate} disabled={isCalculating}>
-          {isCalculating ? (
-            <span className="flex items-center gap-1.5">
-              <Loader2 className="h-3 w-3 animate-spin" />
-              Calculating…
-            </span>
-          ) : (
-            "Calculate BMI"
-          )}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            className="border-emerald-200"
+            onClick={() => void persistOperationsData(true)}
+            disabled={saveStatus === "saving" || !assessmentCycleId}
+          >
+            {saveStatus === "saving" ? "Saving..." : "Save BMI to Database"}
+          </Button>
+          <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={handleCalculate} disabled={isCalculating}>
+            {isCalculating ? (
+              <span className="flex items-center gap-1.5">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Calculating…
+              </span>
+            ) : (
+              "Calculate BMI"
+            )}
+          </Button>
+        </div>
       </div>
 
       <Dialog open={showScoreDialog} onOpenChange={setShowScoreDialog}>

@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic"
 
 /**
  * GET /api/facility/[facilityId]/efficiency-performance?days=30&mock=1&evaluateAlerts=1&solarCapacityKw=5
- * Meter-based efficiency vs expected yield, payment-model billing context, optional alert evaluation.
+ * Energy efficiency assessment vs expected yield, payment-model billing context, optional alert evaluation.
  */
 export async function GET(
   request: NextRequest,

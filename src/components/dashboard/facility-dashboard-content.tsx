@@ -333,9 +333,6 @@ export function FacilityDashboardContent({
     }
   }, [energyData, timeRange])
 
-  const energyEfficiencyScore = Math.round(metrics.efficiency || 0)
-  const carbonCreditEarned = Math.floor((metrics.totalSolarGeneration || 0) / 1000)
-
   const subscribedServices = useMemo(() => [] as { label: string; href: string; icon: typeof CreditCard }[], [])
 
   const { data: overviewCarbonCredits = [] } = useQuery({
@@ -352,6 +349,59 @@ export function FacilityDashboardContent({
     initialData: [],
     refetchInterval: 60000,
   })
+
+  const {
+    data: assessmentOverviewSnapshot,
+    isLoading: isAssessmentSnapshotLoading,
+    isFetching: isAssessmentSnapshotFetching,
+  } = useQuery({
+    queryKey: ["overview-assessment-snapshot", facilityId],
+    enabled: !!facilityId,
+    queryFn: async () => {
+      if (!facilityId) return null
+      const res = await fetch(`/api/facility/${facilityId}/assessment-reports`, { cache: "no-store" })
+      if (!res.ok) return null
+      const json = await res.json()
+      if (!json?.success) return null
+      return {
+        energy: json.latestEnergy?.payload ?? null,
+        climate: json.latestClimate?.payload ?? null,
+      }
+    },
+    refetchInterval: 60000,
+  })
+
+  const persistedSizingSummary =
+    (assessmentOverviewSnapshot?.energy as any)?.sizingSummary ??
+    (assessmentOverviewSnapshot?.energy as any)?.sizingData?.sizingSummary ??
+    null
+  const persistedOperations =
+    (assessmentOverviewSnapshot?.energy as any)?.operationsData ??
+    (assessmentOverviewSnapshot?.energy as any)?.operations ??
+    null
+  const persistedAssessmentScore =
+    typeof persistedOperations?.assessmentScore === "number" ? Number(persistedOperations.assessmentScore) : null
+  const persistedBmiPercent = persistedAssessmentScore !== null ? Math.round((persistedAssessmentScore / 40) * 100) : null
+  const persistedClimateRcsRaw =
+    (assessmentOverviewSnapshot?.climate as any)?.score?.rcs ??
+    (assessmentOverviewSnapshot?.climate as any)?.climateScore?.rcs
+  const persistedClimateRcs =
+    persistedClimateRcsRaw !== undefined && persistedClimateRcsRaw !== null ? Number(persistedClimateRcsRaw) : null
+  const assessedPowerKw =
+    typeof persistedSizingSummary?.solarArraySize === "number" ? Number(persistedSizingSummary.solarArraySize) : null
+  const assessedDailyLoadKwh =
+    typeof persistedSizingSummary?.totalDailyLoad === "number" ? Number(persistedSizingSummary.totalDailyLoad) : null
+  const assessmentSnapshotBusy = isAssessmentSnapshotLoading || isAssessmentSnapshotFetching
+  const hasAssessmentSnapshot = Boolean(assessmentOverviewSnapshot?.energy || assessmentOverviewSnapshot?.climate)
+
+  // Prefer persisted assessment-cycle values so overview survives refresh without live telemetry.
+  const sessionBmiPercent = bmiSummary?.score ? Math.round((bmiSummary.score / 40) * 100) : null
+  const energyEfficiencyScore = sessionBmiPercent ?? persistedBmiPercent ?? Math.round(metrics.efficiency || 0)
+  const sessionClimateScore = sectionScores
+    ? Math.round((sectionScores.reliability + sectionScores.wastage + sectionScores.thermal + sectionScores.behavior) / 4)
+    : null
+  const climateResilienceScore = sessionClimateScore ?? persistedClimateRcs ?? 0
+  const displayTotalConsumption = metrics.totalConsumption > 0 ? metrics.totalConsumption : assessedDailyLoadKwh ?? 0
 
   const overviewTrends = useMemo(() => {
     const rows = (energyData || [])
@@ -451,6 +501,9 @@ export function FacilityDashboardContent({
       }))
     return { totalCredits, totalValue, chart }
   }, [overviewCarbonCredits])
+
+  // Wire carbon credit card to actual assessment data
+  const carbonCreditEarnedCalc = creditsSummary.totalCredits ? creditsSummary.totalCredits.toFixed(3) : Math.floor((metrics.totalSolarGeneration || 0) / 1000)
 
   return (
     <div className="h-screen bg-gray-50 flex overflow-hidden">
@@ -687,7 +740,11 @@ export function FacilityDashboardContent({
                     </CardHeader>
                     <CardContent className="relative z-10 px-3 pb-3 pt-0 text-center space-y-2">
                       <div className="text-2xl font-extrabold text-emerald-700">
-                        {energyEfficiencyScore}%
+                        {assessmentSnapshotBusy ? (
+                          <span className="inline-block h-7 w-16 animate-pulse rounded bg-emerald-100" />
+                        ) : (
+                          `${energyEfficiencyScore}%`
+                        )}
                       </div>
                       <div className="flex items-center justify-center gap-1 text-[11px] text-emerald-700">
                         <TrendingUp className="h-3 w-3" />
@@ -695,10 +752,11 @@ export function FacilityDashboardContent({
                       </div>
                       <div className="h-1.5 w-full rounded-full bg-emerald-100 overflow-hidden">
                         <div
-                          className="h-full bg-emerald-500 transition-all"
+                          className={`h-full bg-emerald-500 transition-all ${assessmentSnapshotBusy ? "animate-pulse" : ""}`}
                           style={{ width: `${Math.min(energyEfficiencyScore, 100)}%` }}
                         />
                       </div>
+                      {assessmentSnapshotBusy && <p className="text-[10px] text-emerald-600">Loading from database...</p>}
                     </CardContent>
                   </Card>
 
@@ -714,7 +772,7 @@ export function FacilityDashboardContent({
                     </CardHeader>
                     <CardContent className="relative z-10 px-3 pb-3 pt-0 text-center space-y-2">
                       <div className="text-2xl font-extrabold text-blue-700">
-                        {carbonCreditEarned}
+                        {carbonCreditEarnedCalc}
                       </div>
                       <div className="flex items-center justify-center gap-1 text-[11px] text-blue-700">
                         <TrendingUp className="h-3 w-3" />
@@ -723,24 +781,35 @@ export function FacilityDashboardContent({
                     </CardContent>
                   </Card>
 
-                  <Card className="relative overflow-hidden border border-amber-100 bg-gradient-to-b from-amber-50/60 via-white to-white hover:border-amber-500/60 transition-all duration-300 hover:shadow-lg group rounded-2xl">
-                    <div className="absolute inset-0 bg-gradient-to-br from-amber-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                  <Card className="relative overflow-hidden border border-purple-100 bg-gradient-to-b from-purple-50/60 via-white to-white hover:border-purple-500/60 transition-all duration-300 hover:shadow-lg group rounded-2xl">
+                    <div className="absolute inset-0 bg-gradient-to-br from-purple-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                     <CardHeader className="flex flex-col items-center pb-2 relative z-10">
-                      <div className="rounded-xl bg-amber-500/10 p-1.5 group-hover:bg-amber-500/20 transition-colors">
-                        <DollarSign className="h-4 w-4 text-amber-600" />
+                      <div className="rounded-xl bg-purple-500/10 p-1.5 group-hover:bg-purple-500/20 transition-colors">
+                        <CloudSun className="h-4 w-4 text-purple-600" />
                       </div>
-                      <CardTitle className="text-[11px] font-semibold text-amber-900 text-center mt-2 tracking-wide uppercase">
-                        Credit Balance
+                      <CardTitle className="text-[11px] font-semibold text-purple-900 text-center mt-2 tracking-wide uppercase">
+                        Climate Resilience
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="relative z-10 px-3 pb-3 pt-0 text-center space-y-2">
-                      <div className="text-lg font-extrabold text-amber-700">
-                        {formatCurrency(creditBalance)}
+                      <div className="text-2xl font-extrabold text-purple-700">
+                        {assessmentSnapshotBusy ? (
+                          <span className="inline-block h-7 w-16 animate-pulse rounded bg-purple-100" />
+                        ) : (
+                          `${climateResilienceScore}%`
+                        )}
                       </div>
-                      <div className="flex items-center justify-center gap-1 text-[11px] text-amber-700">
+                      <div className="flex items-center justify-center gap-1 text-[11px] text-purple-700">
                         <TrendingUp className="h-3 w-3" />
-                        <span>Available balance</span>
+                        <span>Resilience score</span>
                       </div>
+                      <div className="h-1.5 w-full rounded-full bg-purple-100 overflow-hidden">
+                        <div
+                          className={`h-full bg-purple-500 transition-all ${assessmentSnapshotBusy ? "animate-pulse" : ""}`}
+                          style={{ width: `${Math.min(climateResilienceScore, 100)}%` }}
+                        />
+                      </div>
+                      {assessmentSnapshotBusy && <p className="text-[10px] text-purple-600">Loading from database...</p>}
                     </CardContent>
                   </Card>
 
@@ -753,73 +822,94 @@ export function FacilityDashboardContent({
                     </CardHeader>
                     <CardContent className="p-2 text-center">
                       <div className="text-lg font-bold text-gray-900">
-                        {metrics.totalConsumption.toFixed(1)} kWh
+                        {assessmentSnapshotBusy ? (
+                          <span className="inline-block h-6 w-24 animate-pulse rounded bg-gray-100" />
+                        ) : (
+                          `${displayTotalConsumption.toFixed(1)} kWh`
+                        )}
                       </div>
                       <p className="text-[11px] text-gray-500 mt-1">
-                        {timeRange === 'today' ? 'Today' : timeRange === 'week' ? 'This week' : 'This month'}
+                        {metrics.totalConsumption > 0
+                          ? timeRange === 'today'
+                            ? 'Today'
+                            : timeRange === 'week'
+                              ? 'This week'
+                              : 'This month'
+                          : 'From latest assessment'}
                       </p>
                     </CardContent>
                   </Card>
 
-                  {/* Energy Metrics - Row 2 */}
+                  {/* Assessment-backed overview metrics (no live telemetry dependency) */}
                   <Card className={`${panelCardClass} rounded-2xl bg-white/80`}>
                     <CardHeader className="flex flex-col items-center pb-1">
                       <Zap className="h-4 w-4 text-green-600" />
                       <CardTitle className="text-[11px] font-semibold text-gray-700 text-center mt-2 tracking-wide uppercase">
-                        Peak Power
+                        Assessed Power Need
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="p-2 text-center">
                       <div className="text-lg font-bold text-gray-900">
-                        {metrics.maxPower.toFixed(1)} W
-                      </div>
-                      <p className="text-[11px] text-gray-500 mt-1">Maximum demand</p>
-                    </CardContent>
-                  </Card>
-
-                  <Card className={`${panelCardClass} rounded-2xl bg-white/80`}>
-                    <CardHeader className="flex flex-col items-center pb-1">
-                      <DollarSign className="h-4 w-4 text-green-600" />
-                      <CardTitle className="text-[11px] font-semibold text-gray-700 text-center mt-2 tracking-wide uppercase">
-                        Cost Savings
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-2 text-center">
-                      <div className="text-lg font-bold text-gray-900">
-                        {formatCurrency(metrics.costSavings)}
-                      </div>
-                      <p className="text-[11px] text-gray-500 mt-1">Solar contribution</p>
-                    </CardContent>
-                  </Card>
-
-                  <Card className={`${panelCardClass} rounded-2xl bg-white/80`}>
-                    <CardHeader className="flex flex-col items-center pb-1">
-                      <TrendingUp className="h-4 w-4 text-green-600" />
-                      <CardTitle className="text-[11px] font-semibold text-gray-700 text-center mt-2 tracking-wide uppercase">
-                        System Efficiency
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-2 text-center">
-                      <div className="text-lg font-bold text-gray-900">
-                        {metrics.efficiency.toFixed(1)}%
-                      </div>
-                      <p className="text-[11px] text-gray-500 mt-1">Overall efficiency</p>
-                    </CardContent>
-                  </Card>
-
-                  <Card className={`${panelCardClass} rounded-2xl bg-white/80`}>
-                    <CardHeader className="flex flex-col items-center pb-1">
-                      <Sun className="h-4 w-4 text-green-600" />
-                      <CardTitle className="text-[11px] font-semibold text-gray-700 text-center mt-2 tracking-wide uppercase">
-                        Solar Generation
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-2 text-center">
-                      <div className="text-lg font-bold text-gray-900">
-                        {metrics.totalSolarGeneration.toFixed(1)} kWh
+                        {assessmentSnapshotBusy ? (
+                          <span className="inline-block h-6 w-20 animate-pulse rounded bg-gray-100" />
+                        ) : assessedPowerKw !== null ? (
+                          `${assessedPowerKw.toFixed(1)} kW`
+                        ) : (
+                          "N/A"
+                        )}
                       </div>
                       <p className="text-[11px] text-gray-500 mt-1">
-                        {timeRange === 'today' ? 'Today' : timeRange === 'week' ? 'This week' : 'This month'}
+                        {assessmentSnapshotBusy ? "Loading from database..." : "From sizing assessment"}
+                      </p>
+                    </CardContent>
+                  </Card>
+
+                  <Card className={`${panelCardClass} rounded-2xl bg-white/80`}>
+                    <CardHeader className="flex flex-col items-center pb-1">
+                      <Activity className="h-4 w-4 text-green-600" />
+                      <CardTitle className="text-[11px] font-semibold text-gray-700 text-center mt-2 tracking-wide uppercase">
+                        Assessment Cycle
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-2 text-center">
+                      <div className="text-lg font-bold text-gray-900">
+                        {assessmentSnapshotBusy ? (
+                          <span className="inline-block h-6 w-20 animate-pulse rounded bg-gray-100" />
+                        ) : hasAssessmentSnapshot ? (
+                          "Saved"
+                        ) : (
+                          "No data"
+                        )}
+                      </div>
+                      <p className="text-[11px] text-gray-500 mt-1">
+                        {assessmentSnapshotBusy
+                          ? "Loading from database..."
+                          : hasAssessmentSnapshot
+                            ? "Auto-loaded from database"
+                            : "Complete assessment to populate"}
+                      </p>
+                    </CardContent>
+                  </Card>
+
+                  <Card className={`${panelCardClass} rounded-2xl bg-white/80`}>
+                    <CardHeader className="flex flex-col items-center pb-1">
+                      <BarChart3 className="h-4 w-4 text-green-600" />
+                      <CardTitle className="text-[11px] font-semibold text-gray-700 text-center mt-2 tracking-wide uppercase">
+                        Assessment Load
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-2 text-center">
+                      <div className="text-lg font-bold text-gray-900">
+                        {assessmentSnapshotBusy ? (
+                          <span className="inline-block h-6 w-24 animate-pulse rounded bg-gray-100" />
+                        ) : assessedDailyLoadKwh !== null ? (
+                          `${assessedDailyLoadKwh.toFixed(1)} kWh/d`
+                        ) : (
+                          "N/A"
+                        )}
+                      </div>
+                      <p className="text-[11px] text-gray-500 mt-1">
+                        {assessmentSnapshotBusy ? "Loading from database..." : "From devices &amp; loads assessment"}
                       </p>
                     </CardContent>
                   </Card>
@@ -1314,121 +1404,7 @@ export function FacilityDashboardContent({
                 {facilityId && (
                   <FacilityMeterEfficiencyDashboard facilityId={facilityId} preferMock={false} />
                 )}
-                <Card className={panelCardClass}>
-                  <CardHeader>
-                    <CardTitle className={cn("flex items-center gap-2", sectionTitleClass)}>
-                      <Gauge className="w-5 h-5 text-green-600" />
-                      Energy Efficiency
-                    </CardTitle>
-                    <CardDescription className={metaTextClass}>
-                      Overview of your facility&apos;s solar performance, efficiency, and savings.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    {!facilityId || !energyData || energyData.length === 0 ? (
-                      <div className="text-center py-8 text-sm text-gray-500">
-                        {!facilityId
-                          ? "Energy efficiency metrics will appear here once your facility is fully registered."
-                          : "Energy efficiency insights will appear here once enough energy data is available."}
-                      </div>
-                    ) : (
-                      <div className="grid gap-6 lg:grid-cols-3">
-                        {/* Score card */}
-                        <div className="lg:col-span-1">
-                          <div className="bg-gradient-to-br from-emerald-50 to-green-50 border border-emerald-100 rounded-2xl p-5 h-full flex flex-col justify-between">
-                            <div className="space-y-3">
-                              <p className="text-xs font-medium text-emerald-700 uppercase tracking-wide">
-                                Efficiency Score
-                              </p>
-                              <p className="text-5xl font-bold text-emerald-700">
-                                {energyEfficiencyScore}
-                              </p>
-                              <p className="text-xs text-gray-500">
-                                Combined score based on solar contribution, battery performance, and overall efficiency.
-                              </p>
-                            </div>
-                            <div className="mt-4 space-y-1 text-xs text-gray-600">
-                              <p>
-                                • Solar contribution:{" "}
-                                <span className="font-semibold">
-                                  {metrics.solarPercentage.toFixed(1)}%
-                                </span>
-                              </p>
-                              <p>
-                                • Average battery level:{" "}
-                                <span className="font-semibold">
-                                  {metrics.avgBatteryLevel.toFixed(1)}%
-                                </span>
-                              </p>
-                              <p>
-                                • Estimated monthly savings:{" "}
-                                <span className="font-semibold">
-                                  {formatCurrency(metrics.costSavings)}
-                                </span>
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Key metrics */}
-                        <div className="lg:col-span-2 space-y-4">
-                          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                            <Card className="border border-gray-100">
-                              <CardHeader className="pb-1">
-                                <CardDescription className={metricTitleClass}>
-                                  Total Consumption (last {timeRange === "today" ? "day" : timeRange === "week" ? "7 days" : "30 days"})
-                                </CardDescription>
-                                <CardTitle className="text-2xl">
-                                  {metrics.totalConsumption.toFixed(1)} kWh
-                                </CardTitle>
-                              </CardHeader>
-                              <CardContent className="pt-1">
-                                <p className={metaTextClass}>
-                                  Based on {energyData.length} data point{energyData.length !== 1 && "s"} from your devices.
-                                </p>
-                              </CardContent>
-                            </Card>
-
-                            <Card className="border border-gray-100">
-                              <CardHeader className="pb-1">
-                                <CardDescription className={metricTitleClass}>Solar Contribution</CardDescription>
-                                <CardTitle className="text-2xl">
-                                  {metrics.solarPercentage.toFixed(1)}%
-                                </CardTitle>
-                              </CardHeader>
-                              <CardContent className="pt-1">
-                                <p className={metaTextClass}>
-                                  {metrics.totalSolarGeneration.toFixed(1)} kWh generated from solar in this period.
-                                </p>
-                              </CardContent>
-                            </Card>
-
-                            <Card className="border border-gray-100">
-                              <CardHeader className="pb-1">
-                                <CardDescription className={metricTitleClass}>Estimated Carbon Credits</CardDescription>
-                                <CardTitle className="text-2xl">
-                                  {carbonCreditEarned}
-                                </CardTitle>
-                              </CardHeader>
-                              <CardContent className="pt-1">
-                                <p className={metaTextClass}>
-                                  Approximate credits based on solar generation over the selected period.
-                                </p>
-                              </CardContent>
-                            </Card>
-                          </div>
-
-                          <div className="bg-gray-50 border border-dashed border-gray-200 rounded-xl p-4 text-xs text-gray-600 space-y-1">
-                            <p className="font-semibold text-gray-700 mb-1">How to improve your score:</p>
-                            <p>• Increase the share of solar in your total consumption by shifting critical loads to daytime.</p>
-                            <p>• Keep batteries within a healthy charge range to maximize lifespan and availability.</p>
-                            <p>• Track and reduce unnecessary overnight loads and standby consumption.</p>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
+                
 
                 <Card className={panelCardClass}>
                   <CardHeader>

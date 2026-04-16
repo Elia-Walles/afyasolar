@@ -17,7 +17,15 @@ function isUuid(v: unknown): v is string {
 }
 
 async function requireCycleAccess(session: any, cycleId: string) {
-  const [cycle] = await db.select().from(assessmentCycles).where(eq(assessmentCycles.id, cycleId)).limit(1)
+  const [cycle] = await db
+    .select({
+      id: assessmentCycles.id,
+      facilityId: assessmentCycles.facilityId,
+      status: assessmentCycles.status,
+    })
+    .from(assessmentCycles)
+    .where(eq(assessmentCycles.id, cycleId))
+    .limit(1)
   if (!cycle) return { error: NextResponse.json({ error: "Assessment cycle not found" }, { status: 404 }) as any }
 
   if (session.user.role !== "admin" && session.user.facilityId !== cycle.facilityId) {

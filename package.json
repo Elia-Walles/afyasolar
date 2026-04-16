@@ -9,6 +9,7 @@
     "start": "next start",
     "type-check": "tsc --noEmit",
     "db:migrate": "tsx src/lib/db/migrate.ts",
+    "db:create-assessment-report-tables": "tsx scripts/create-assessment-report-tables.ts",
     "db:ensure-efficiency-climate": "tsx src/lib/db/run-ensure-efficiency-climate-cli.ts",
     "db:seed": "tsx src/lib/db/seed.ts",
     "create-admin": "tsx src/lib/db/create-admin.ts",

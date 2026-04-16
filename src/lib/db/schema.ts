@@ -2319,6 +2319,7 @@ export const carbonCredits = mysqlTable('carbon_credits', {
 
 export const assessmentCycles = mysqlTable('assessment_cycles', {
   id: varchar('id', { length: 36 }).primaryKey(),
+  assessmentNumber: int('assessment_number').notNull().default(0),
   facilityId: varchar('facility_id', { length: 36 }).notNull(),
   startedAt: datetime('started_at', { mode: 'date' }).notNull().default(sql`CURRENT_TIMESTAMP`),
   completedAt: datetime('completed_at', { mode: 'date' }),
@@ -2467,6 +2468,46 @@ export const assessmentCycleEnergyState = mysqlTable('assessment_cycle_energy_st
 }, (table) => ({
   cycleIdx: index('aces_cycle_idx').on(table.assessmentCycleId),
   facilityIdx: index('aces_facility_idx').on(table.facilityId),
+}))
+
+/**
+ * Snapshot table for full energy assessment reports saved explicitly by users.
+ * Stores all design/finance and sizing outputs as a JSON payload.
+ */
+export const facilityEnergyAssessments = mysqlTable('facility_energy_assessments', {
+  id: varchar('id', { length: 36 }).primaryKey(),
+  facilityId: varchar('facility_id', { length: 36 }).notNull(),
+  assessmentCycleId: varchar('assessment_cycle_id', { length: 36 }),
+  assessmentDate: datetime('assessment_date', { mode: 'date' }).notNull().default(sql`CURRENT_TIMESTAMP`),
+  savedBy: varchar('saved_by', { length: 120 }),
+  sourceVersion: varchar('source_version', { length: 20 }).notNull().default('3.0'),
+  payload: json('payload').notNull(),
+  createdAt: datetime('created_at', { mode: 'date' }).notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: datetime('updated_at', { mode: 'date' }).notNull().default(sql`CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`),
+}, (table) => ({
+  facilityIdx: index('fea_facility_idx').on(table.facilityId),
+  cycleIdx: index('fea_cycle_idx').on(table.assessmentCycleId),
+  dateIdx: index('fea_date_idx').on(table.assessmentDate),
+}))
+
+/**
+ * Snapshot table for full climate resilience reports saved explicitly by users.
+ * Stores score, risks, responses and evidence payload as JSON.
+ */
+export const facilityClimateAssessments = mysqlTable('facility_climate_assessments', {
+  id: varchar('id', { length: 36 }).primaryKey(),
+  facilityId: varchar('facility_id', { length: 36 }).notNull(),
+  assessmentCycleId: varchar('assessment_cycle_id', { length: 36 }),
+  assessmentDate: datetime('assessment_date', { mode: 'date' }).notNull().default(sql`CURRENT_TIMESTAMP`),
+  savedBy: varchar('saved_by', { length: 120 }),
+  sourceVersion: varchar('source_version', { length: 20 }).notNull().default('3.0'),
+  payload: json('payload').notNull(),
+  createdAt: datetime('created_at', { mode: 'date' }).notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: datetime('updated_at', { mode: 'date' }).notNull().default(sql`CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`),
+}, (table) => ({
+  facilityIdx: index('fca_facility_idx').on(table.facilityId),
+  cycleIdx: index('fca_cycle_idx').on(table.assessmentCycleId),
+  dateIdx: index('fca_date_idx').on(table.assessmentDate),
 }))
 
 /**

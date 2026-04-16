@@ -9,8 +9,23 @@ import { generateId } from "@/lib/utils"
 export const dynamic = "force-dynamic"
 export const revalidate = 0
 
+function isDuplicateEntryError(error: unknown): boolean {
+  const e = error as { code?: string; sqlMessage?: string; message?: string }
+  if (e?.code === "ER_DUP_ENTRY") return true
+  const msg = `${e?.sqlMessage || ""} ${e?.message || ""}`.toLowerCase()
+  return msg.includes("duplicate entry")
+}
+
 async function requireCycleAccess(session: { user: { role?: string; facilityId?: string | null } }, cycleId: string) {
-  const [cycle] = await db.select().from(assessmentCycles).where(eq(assessmentCycles.id, cycleId)).limit(1)
+  const [cycle] = await db
+    .select({
+      id: assessmentCycles.id,
+      facilityId: assessmentCycles.facilityId,
+      status: assessmentCycles.status,
+    })
+    .from(assessmentCycles)
+    .where(eq(assessmentCycles.id, cycleId))
+    .limit(1)
   if (!cycle) {
     return { error: NextResponse.json({ error: "Assessment cycle not found" }, { status: 404 }) as const }
   }
@@ -30,14 +45,26 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
     const { cycleId } = await params
-    const gate = await requireCycleAccess(session.user as any, cycleId)
+    const gate = await requireCycleAccess(session as any, cycleId)
     if ("error" in gate) return gate.error
 
-    const [row] = await db
-      .select()
-      .from(assessmentCycleEnergyState)
-      .where(eq(assessmentCycleEnergyState.assessmentCycleId, cycleId))
-      .limit(1)
+    let row = null
+    try {
+      const rows = await db
+        .select()
+        .from(assessmentCycleEnergyState)
+        .where(eq(assessmentCycleEnergyState.assessmentCycleId, cycleId))
+        .limit(1)
+      row = rows[0] ?? null
+    } catch (dbError) {
+      // Table might not exist yet - return null data
+      console.warn("assessment_cycle_energy_state table might not exist yet:", dbError)
+      row = null
+    }
+
+    // #region agent log
+    fetch('http://127.0.0.1:7272/ingest/c99fbffc-2c05-4b71-ad32-c7c14a4d90a6',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'af648d'},body:JSON.stringify({sessionId:'af648d',runId:'pre-fix',hypothesisId:'H1',location:'assessment-cycles/[cycleId]/energy/route.ts:GET',message:'API energy snapshot returned',data:{cycleId,facilityId:gate.cycle.facilityId,hasRow:!!row,hasSizingData:!!row?.sizingData,hasSizingSummary:!!(row?.sizingData as any)?.sizingSummary,hasMeuSummary:!!(row?.sizingData as any)?.meuSummary,hasOperationsData:!!row?.operationsData,opsAssessmentScore:(row?.operationsData as any)?.assessmentScore ?? null,hasTrend:Array.isArray(row?.bmiTrendJson) && row!.bmiTrendJson.length > 0},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
 
     return NextResponse.json({
       success: true,
@@ -64,7 +91,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
     const { cycleId } = await params
-    const gate = await requireCycleAccess(session.user as any, cycleId)
+    const gate = await requireCycleAccess(session as any, cycleId)
     if ("error" in gate) return gate.error
 
     const body = (await request.json().catch(() => ({}))) as {
@@ -85,16 +112,30 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
     if (!existing) {
       const id = generateId()
-      await db.insert(assessmentCycleEnergyState).values({
-        id,
-        assessmentCycleId: cycleId,
-        facilityId: gate.cycle.facilityId,
-        sizingData: nextSizing as any,
-        operationsData: nextOps as any,
-        bmiTrendJson: nextTrend as any,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      })
+      try {
+        await db.insert(assessmentCycleEnergyState).values({
+          id,
+          assessmentCycleId: cycleId,
+          facilityId: gate.cycle.facilityId,
+          sizingData: nextSizing as any,
+          operationsData: nextOps as any,
+          bmiTrendJson: nextTrend as any,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        })
+      } catch (error) {
+        // Autosave can trigger concurrent writes; fall back to update when row was created in parallel.
+        if (!isDuplicateEntryError(error)) throw error
+        await db
+          .update(assessmentCycleEnergyState)
+          .set({
+            sizingData: nextSizing as any,
+            operationsData: nextOps as any,
+            bmiTrendJson: nextTrend as any,
+            updatedAt: new Date(),
+          })
+          .where(eq(assessmentCycleEnergyState.assessmentCycleId, cycleId))
+      }
     } else {
       await db
         .update(assessmentCycleEnergyState)

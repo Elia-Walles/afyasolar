@@ -106,10 +106,10 @@ export function FacilityMeterEfficiencyDashboard({
         <div>
           <CardTitle className="text-base flex items-center gap-2">
             <Gauge className="h-5 w-5 text-emerald-600" />
-            Meter-based efficiency
+            Energy efficiency assessment
           </CardTitle>
           <CardDescription className="text-xs mt-1 max-w-xl">
-            Actual vs expected yield (kWh), irradiance, inverter performance ratio, and estimated yearly degradation —{" "}
+            Actual vs expected yield (kWh), irradiance, inverter performance ratio, and estimated yearly degradation {" "}
             <span className="font-medium">blends smart-meter data when present</span> with deterministic demo data for
             empty sites.
           </CardDescription>
@@ -137,28 +137,6 @@ export function FacilityMeterEfficiencyDashboard({
               {data.summary.latestUnderperforming && (
                 <Badge className="bg-amber-100 text-amber-900 border-amber-200">Latest period underperforming</Badge>
               )}
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-              <div className="rounded-lg border bg-muted/40 p-3">
-                <p className="text-muted-foreground text-xs">Avg efficiency</p>
-                <p className="text-xl font-semibold">{data.summary.avgEfficiencyPct}%</p>
-              </div>
-              <div className="rounded-lg border bg-muted/40 p-3">
-                <p className="text-muted-foreground text-xs">Avg perf. ratio</p>
-                <p className="text-xl font-semibold">{data.summary.avgPerformanceRatio}</p>
-              </div>
-              <div className="rounded-lg border bg-muted/40 p-3">
-                <p className="text-muted-foreground text-xs">Underperforming days</p>
-                <p className="text-xl font-semibold">{data.summary.underperformingDays}</p>
-              </div>
-              <div className="rounded-lg border bg-muted/40 p-3">
-                <p className="text-muted-foreground text-xs">Degradation (est. / yr)</p>
-                <p className="text-xl font-semibold">
-                  {data.daily[data.daily.length - 1]?.degradationYearlyPct?.toFixed?.(2) ??
-                    data.daily[data.daily.length - 1]?.degradationYearlyPct}
-                  %
-                </p>
-              </div>
             </div>
             <div className="rounded-lg border border-dashed p-3 text-xs bg-amber-50/50 text-amber-950">
               <p className="font-semibold mb-1">Billing &amp; contract context</p>

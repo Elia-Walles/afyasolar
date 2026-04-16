@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { useSession } from "next-auth/react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -49,14 +50,18 @@ import {
   ListChecks,
   RotateCcw,
   Sparkles,
+  Database,
 } from "lucide-react"
 
 type IntelTab = "overview" | "assess" | "analyze" | "action" | "reports"
 
 type AssessmentCycleRow = {
   id: string
+  facilityId?: string
+  facilityName?: string | null
   status: string
   startedAt?: string | Date | null
+  assessmentNumber?: number | null
 }
 
 const tabTriggerClass =
@@ -123,15 +128,42 @@ export function FacilityIntelligencePlatform({
     operationsData: unknown | null
     bmiTrendJson: unknown | null
   } | null>(null)
+  const [energySnapshotLoading, setEnergySnapshotLoading] = useState(false)
+  const [climateSnapshotLoading, setClimateSnapshotLoading] = useState(false)
   const [assessmentCyclesList, setAssessmentCyclesList] = useState<AssessmentCycleRow[]>([])
   const [reassessBusy, setReassessBusy] = useState(false)
   const [reassessDialogOpen, setReassessDialogOpen] = useState(false)
+  const [dateRangeFilter, setDateRangeFilter] = useState<"all" | "30d" | "90d" | "365d">("all")
+  const [saveSnapshotBusy, setSaveSnapshotBusy] = useState(false)
+  const { data: session } = useSession()
+  const isAdmin = session?.user?.role === "admin"
 
   const selectedCycle = useMemo(
     () => assessmentCyclesList.find((c) => c.id === assessmentCycleId) ?? null,
     [assessmentCyclesList, assessmentCycleId]
   )
   const assessmentReadOnly = Boolean(selectedCycle && selectedCycle.status !== "draft")
+
+  const filteredAssessmentCycles = useMemo(() => {
+    const now = Date.now()
+    const maxAgeMs =
+      dateRangeFilter === "30d"
+        ? 30 * 24 * 60 * 60 * 1000
+        : dateRangeFilter === "90d"
+          ? 90 * 24 * 60 * 60 * 1000
+          : dateRangeFilter === "365d"
+            ? 365 * 24 * 60 * 60 * 1000
+            : null
+
+    return assessmentCyclesList.filter((cycle) => {
+      if (!maxAgeMs) return true
+      const cycleDate = cycle.startedAt instanceof Date ? cycle.startedAt : new Date(cycle.startedAt as string)
+      const cycleTs = cycleDate.getTime()
+      if (!Number.isFinite(cycleTs)) return false
+      if (now - cycleTs > maxAgeMs) return false
+      return true
+    })
+  }, [assessmentCyclesList, dateRangeFilter])
 
   const formatCycleLabel = useCallback((c: AssessmentCycleRow) => {
     const raw = c.startedAt
@@ -142,11 +174,14 @@ export function FacilityIntelligencePlatform({
     const label = Number.isFinite(d.getTime()) ? d.toLocaleDateString(undefined, { dateStyle: "medium" }) : "—"
     const tag =
       c.status === "draft" ? "Current (editing)" : c.status === "completed" ? "Previous (saved)" : c.status
-    return `${label} · ${tag}`
-  }, [])
+    const assessmentNum = c.assessmentNumber ? `#${c.assessmentNumber}` : ""
+    const scopeLabel = isAdmin ? `${c.facilityName ?? facilityName ?? "Facility"}` : null
+    const coreLabel = assessmentNum ? `${assessmentNum} · ${label} · ${tag}` : `${label} · ${tag}`
+    return scopeLabel ? `${scopeLabel} · ${coreLabel}` : coreLabel
+  }, [facilityName, isAdmin])
 
   const handleReassessConfirm = useCallback(async () => {
-    if (!facilityId || !assessmentCycleId) return
+    if (isAdmin || !facilityId || !assessmentCycleId) return
     setReassessBusy(true)
     setReassessDialogOpen(false)
     try {
@@ -186,12 +221,45 @@ export function FacilityIntelligencePlatform({
     } finally {
       setReassessBusy(false)
     }
+  }, [facilityId, assessmentCycleId, isAdmin])
+
+  const handleSaveSnapshot = useCallback(async () => {
+    if (!facilityId || !assessmentCycleId) return
+    setSaveSnapshotBusy(true)
+    try {
+      const [energyRes, climateRes] = await Promise.all([
+        fetch(`/api/assessment-cycles/${assessmentCycleId}/energy`, { cache: "no-store" }),
+        fetch(`/api/assessment-cycles/${assessmentCycleId}/climate`, { cache: "no-store" }),
+      ])
+      const energyJson = energyRes.ok ? await energyRes.json().catch(() => ({} as any)) : {}
+      const climateJson = climateRes.ok ? await climateRes.json().catch(() => ({} as any)) : {}
+
+      const saveRes = await fetch(`/api/facility/${facilityId}/assessment-reports`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sourceVersion: "3.0",
+          assessmentCycleId,
+          energy: energyRes.ok ? energyJson : null,
+          climate: climateRes.ok ? climateJson : null,
+        }),
+      })
+      const saveJson = await saveRes.json().catch(() => ({} as any))
+      if (!saveRes.ok || !saveJson?.success) {
+        throw new Error((saveJson as any)?.error || "Failed to save assessment snapshot")
+      }
+      notifySuccess("Saved to database", "Latest energy and climate snapshots were stored successfully.")
+    } catch (e) {
+      notifyError("Could not save snapshot", getErrorMessage(e))
+    } finally {
+      setSaveSnapshotBusy(false)
+    }
   }, [facilityId, assessmentCycleId])
 
   // Load cycles; ensure a draft exists for new entries.
   useEffect(() => {
     let cancelled = false
-    if (!facilityId) {
+    if (!facilityId && !isAdmin) {
       setAssessmentCyclesList([])
       setAssessmentCycleId(null)
       setClimateResilienceScore(null)
@@ -202,12 +270,15 @@ export function FacilityIntelligencePlatform({
     }
     ;(async () => {
       try {
-        const cyclesRes = await fetch(`/api/facility/${facilityId}/assessment-cycles`, { cache: "no-store" })
+        const cyclesRes = await fetch(
+          isAdmin ? `/api/assessment-cycles` : `/api/facility/${facilityId}/assessment-cycles`,
+          { cache: "no-store" }
+        )
         const cyclesJson = await cyclesRes.json()
         let cycles: AssessmentCycleRow[] = Array.isArray(cyclesJson?.cycles) ? cyclesJson.cycles : []
 
         let draft = cycles.find((c) => c?.status === "draft")
-        if (!draft) {
+        if (!draft && facilityId && !isAdmin) {
           const createRes = await fetch(`/api/facility/${facilityId}/assessment-cycles`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -223,10 +294,14 @@ export function FacilityIntelligencePlatform({
         if (cancelled) return
         setAssessmentCyclesList(cycles)
 
+        const latestCompleted = cycles.find((c) => c?.status === "completed")
         setAssessmentCycleId((prev) => {
           if (prev && cycles.some((c) => c.id === prev)) return prev
-          return draft?.id ?? cycles[0]?.id ?? null
+          return latestCompleted?.id ?? draft?.id ?? cycles[0]?.id ?? null
         })
+        // #region agent log
+        fetch('http://127.0.0.1:7272/ingest/c99fbffc-2c05-4b71-ad32-c7c14a4d90a6',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'af648d'},body:JSON.stringify({sessionId:'af648d',runId:'pre-fix',hypothesisId:'H2',location:'facility-intelligence-platform.tsx:cycles-load',message:'Loaded cycles and selected draft/latest',data:{facilityId,cyclesCount:cycles.length,draftId:draft?.id ?? null,firstCycleId:cycles[0]?.id ?? null,statuses:cycles.slice(0,5).map((c:any)=>({id:c.id,status:c.status,assessmentNumber:c.assessmentNumber ?? null}))},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
       } catch {
         if (!cancelled) {
           setAssessmentCyclesList([])
@@ -237,17 +312,19 @@ export function FacilityIntelligencePlatform({
     return () => {
       cancelled = true
     }
-  }, [facilityId])
+  }, [facilityId, isAdmin])
 
   // Climate scores for the selected assessment cycle
   useEffect(() => {
     let cancelled = false
     if (!facilityId || !assessmentCycleId) {
+      setClimateSnapshotLoading(false)
       setClimateResilienceScore(null)
       setPersistedClimateScore(null)
       setPersistedTopRisks([])
       return
     }
+    setClimateSnapshotLoading(true)
 
     const isDraftSelected = selectedCycle?.status === "draft"
 
@@ -256,6 +333,9 @@ export function FacilityIntelligencePlatform({
         const climateRes = await fetch(`/api/assessment-cycles/${assessmentCycleId}/climate`, { cache: "no-store" })
         const climateJson = await climateRes.json()
         const score = climateJson?.score?.rcs
+        // #region agent log
+        fetch('http://127.0.0.1:7272/ingest/c99fbffc-2c05-4b71-ad32-c7c14a4d90a6',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'af648d'},body:JSON.stringify({sessionId:'af648d',runId:'pre-fix',hypothesisId:'H3',location:'facility-intelligence-platform.tsx:climate-fetch',message:'Fetched climate snapshot for selected cycle',data:{facilityId,assessmentCycleId,selectedStatus:selectedCycle?.status ?? null,httpOk:climateRes.ok,hasScore:score !== undefined && score !== null,score:score ?? null,topRisksCount:Array.isArray(climateJson?.topRisks)?climateJson.topRisks.length:0},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
         if (cancelled) return
 
         if (score !== undefined && score !== null) {
@@ -289,6 +369,8 @@ export function FacilityIntelligencePlatform({
         }
       } catch {
         if (!cancelled) setClimateResilienceScore(null)
+      } finally {
+        if (!cancelled) setClimateSnapshotLoading(false)
       }
     })()
 
@@ -301,14 +383,24 @@ export function FacilityIntelligencePlatform({
   useEffect(() => {
     let cancelled = false
     if (!assessmentCycleId) {
+      setEnergySnapshotLoading(false)
       setEnergySnapshot(null)
       return
     }
+    setEnergySnapshotLoading(true)
     ;(async () => {
       try {
         const res = await fetch(`/api/assessment-cycles/${assessmentCycleId}/energy`, { cache: "no-store" })
         const j = await res.json()
-        if (cancelled || !res.ok) return
+        // #region agent log
+        fetch('http://127.0.0.1:7272/ingest/c99fbffc-2c05-4b71-ad32-c7c14a4d90a6',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'af648d'},body:JSON.stringify({sessionId:'af648d',runId:'pre-fix',hypothesisId:'H1',location:'facility-intelligence-platform.tsx:energy-fetch',message:'Fetched energy snapshot for selected cycle',data:{facilityId,assessmentCycleId,httpOk:res.ok,hasSizingData:!!j?.sizingData,hasSizingSummary:!!j?.sizingData?.sizingSummary,hasMeuSummary:!!j?.sizingData?.meuSummary,hasOperationsData:!!j?.operationsData,opsAssessmentScore:j?.operationsData?.assessmentScore ?? null,hasBmiTrend:Array.isArray(j?.bmiTrendJson) && j.bmiTrendJson.length > 0},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
+        if (cancelled) return
+        if (!res.ok) {
+          console.error("Failed to fetch energy state:", res.status, j)
+          setEnergySnapshot(null)
+          return
+        }
         setEnergySnapshot({
           sizingData: j.sizingData ?? null,
           operationsData: j.operationsData ?? null,
@@ -326,8 +418,11 @@ export function FacilityIntelligencePlatform({
             // ignore
           }
         }
-      } catch {
+      } catch (error) {
+        console.error("Error fetching energy state:", error)
         if (!cancelled) setEnergySnapshot(null)
+      } finally {
+        if (!cancelled) setEnergySnapshotLoading(false)
       }
     })()
     return () => {
@@ -385,14 +480,29 @@ export function FacilityIntelligencePlatform({
     }
   }, [assessmentCycleId])
 
+  const persistedSizingSummary = ((energySnapshot?.sizingData as any)?.sizingSummary ?? null) as SizingSummary | null
+  const persistedMeuSummary = ((energySnapshot?.sizingData as any)?.meuSummary ?? null) as MeuSummary | null
+  const persistedOpsAssessmentScoreRaw = (energySnapshot?.operationsData as any)?.assessmentScore
+  const persistedOpsAssessmentScore =
+    typeof persistedOpsAssessmentScoreRaw === "number" ? persistedOpsAssessmentScoreRaw : null
+  const persistedBmiSummary =
+    persistedOpsAssessmentScore !== null
+      ? { score: persistedOpsAssessmentScore, bmiPercent: Math.round((persistedOpsAssessmentScore / 40) * 100) }
+      : null
+
+  const resolvedSizingSummary = sizingSummary ?? persistedSizingSummary
+  const resolvedMeuSummary = meuSummary ?? persistedMeuSummary
+  const resolvedBmiSummary = bmiSummary ?? persistedBmiSummary
+  const assessmentDbLoading = energySnapshotLoading || climateSnapshotLoading
+
   const recommendations = useMemo(
-    () => buildIntelligenceRecommendations(sizingSummary, meuSummary, bmiSummary, sectionScores),
-    [sizingSummary, meuSummary, bmiSummary, sectionScores]
+    () => buildIntelligenceRecommendations(resolvedSizingSummary, resolvedMeuSummary, resolvedBmiSummary, sectionScores),
+    [resolvedSizingSummary, resolvedMeuSummary, resolvedBmiSummary, sectionScores]
   )
 
   const completion = useMemo(() => {
-    const devicesDone = Boolean(meuSummary && meuSummary.totalDailyLoad > 0)
-    const operationsDone = Boolean(bmiSummary != null && bmiSummary.score !== null)
+    const devicesDone = Boolean(resolvedMeuSummary && resolvedMeuSummary.totalDailyLoad > 0)
+    const operationsDone = Boolean(resolvedBmiSummary != null && resolvedBmiSummary.score !== null)
     const climateDone = climateResilienceScore !== null
 
     if (isClimateOnly) {
@@ -434,7 +544,7 @@ export function FacilityIntelligencePlatform({
       actionReady: analyzeReady,
       reportsReady: analyzeReady,
     }
-  }, [meuSummary, bmiSummary, climateResilienceScore, isClimateOnly, isEnergyOnly])
+  }, [resolvedMeuSummary, resolvedBmiSummary, climateResilienceScore, isClimateOnly, isEnergyOnly])
 
   const assessProgress = useMemo(() => {
     if (isClimateOnly) {
@@ -443,19 +553,25 @@ export function FacilityIntelligencePlatform({
     if (isEnergyOnly) {
       let done = 0
       const total = 2
-      if (meuSummary && meuSummary.totalDailyLoad > 0) done++
-      if (bmiSummary != null && bmiSummary.score !== null) done++
+      if (resolvedMeuSummary && resolvedMeuSummary.totalDailyLoad > 0) done++
+      if (resolvedBmiSummary != null && resolvedBmiSummary.score !== null) done++
       return Math.round((done / total) * 100)
     }
     let done = 0
     const total = 3
-    if (meuSummary && meuSummary.totalDailyLoad > 0) done++
-    if (bmiSummary != null && bmiSummary.score !== null) done++
+    if (resolvedMeuSummary && resolvedMeuSummary.totalDailyLoad > 0) done++
+    if (resolvedBmiSummary != null && resolvedBmiSummary.score !== null) done++
     if (climateResilienceScore !== null) done++
     return Math.round((done / total) * 100)
-  }, [meuSummary, bmiSummary, climateResilienceScore, isClimateOnly, isEnergyOnly])
+  }, [resolvedMeuSummary, resolvedBmiSummary, climateResilienceScore, isClimateOnly, isEnergyOnly])
 
-  const efficiencyScore = bmiSummary?.bmiPercent ?? null
+  const efficiencyScore = resolvedBmiSummary?.bmiPercent ?? null
+
+  useEffect(() => {
+    // #region agent log
+    fetch('http://127.0.0.1:7272/ingest/c99fbffc-2c05-4b71-ad32-c7c14a4d90a6',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'af648d'},body:JSON.stringify({sessionId:'af648d',runId:'pre-fix',hypothesisId:'H1',location:'facility-intelligence-platform.tsx:render-overview-state',message:'Overview state inputs after hydration',data:{facilityId,assessmentCycleId,selectedCycleStatus:selectedCycle?.status ?? null,propSizingSummary:!!sizingSummary,propMeuSummary:!!meuSummary,propBmiSummary:!!bmiSummary,energySnapshotHasSizingSummary:!!(energySnapshot as any)?.sizingData?.sizingSummary,energySnapshotHasMeuSummary:!!(energySnapshot as any)?.sizingData?.meuSummary,energySnapshotOpsScore:(energySnapshot as any)?.operationsData?.assessmentScore ?? null,persistedClimateRcs:persistedClimateScore?.rcs ?? null},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+  }, [facilityId, assessmentCycleId, selectedCycle?.status, sizingSummary, meuSummary, bmiSummary, energySnapshot, persistedClimateScore])
 
   useEffect(() => {
     if (!facilityId || efficiencyScore == null) return
@@ -652,8 +768,13 @@ export function FacilityIntelligencePlatform({
                 <CardHeader className="pb-2">
                   <CardDescription className="text-xs">Resilience capacity score (RCS)</CardDescription>
                   <CardTitle className="text-2xl text-emerald-900">
-                    {persistedClimateScore?.rcs ?? (climateResilienceScore !== null ? climateResilienceScore : "—")}
+                    {assessmentDbLoading ? (
+                      <span className="inline-block h-8 w-20 animate-pulse rounded bg-emerald-100" />
+                    ) : (
+                      persistedClimateScore?.rcs ?? (climateResilienceScore !== null ? climateResilienceScore : "—")
+                    )}
                   </CardTitle>
+                  {assessmentDbLoading && <p className="text-[11px] text-emerald-700">Loading from database...</p>}
                 </CardHeader>
               </Card>
               <Card className="border-emerald-100">
@@ -670,7 +791,9 @@ export function FacilityIntelligencePlatform({
               <Card className="border-emerald-100">
                 <CardHeader className="pb-2">
                   <CardDescription className="text-xs">Top risk drivers (saved)</CardDescription>
-                  <CardTitle className="text-2xl text-emerald-900">{persistedTopRisks.length}</CardTitle>
+                  <CardTitle className="text-2xl text-emerald-900">
+                    {assessmentDbLoading ? <span className="inline-block h-8 w-10 animate-pulse rounded bg-emerald-100" /> : persistedTopRisks.length}
+                  </CardTitle>
                 </CardHeader>
               </Card>
               <Card className="border-emerald-100">
@@ -700,32 +823,60 @@ export function FacilityIntelligencePlatform({
                 <CardHeader className="pb-2">
                   <CardDescription className="text-xs">Daily demand (est.)</CardDescription>
                   <CardTitle className="text-2xl text-emerald-900">
-                    {sizingSummary ? `${sizingSummary.totalDailyLoad.toFixed(1)} kWh/d` : "—"}
+                    {assessmentDbLoading ? (
+                      <span className="inline-block h-8 w-28 animate-pulse rounded bg-emerald-100" />
+                    ) : resolvedSizingSummary ? (
+                      `${resolvedSizingSummary.totalDailyLoad.toFixed(1)} kWh/d`
+                    ) : (
+                      "—"
+                    )}
                   </CardTitle>
+                  {assessmentDbLoading && <p className="text-[11px] text-emerald-700">Loading from database...</p>}
                 </CardHeader>
               </Card>
               <Card className="border-emerald-100">
                 <CardHeader className="pb-2">
                   <CardDescription className="text-xs">Indicative solar size</CardDescription>
                   <CardTitle className="text-2xl text-emerald-900">
-                    {sizingSummary ? `${sizingSummary.solarArraySize.toFixed(1)} kW` : "—"}
+                    {assessmentDbLoading ? (
+                      <span className="inline-block h-8 w-24 animate-pulse rounded bg-emerald-100" />
+                    ) : resolvedSizingSummary ? (
+                      `${resolvedSizingSummary.solarArraySize.toFixed(1)} kW`
+                    ) : (
+                      "—"
+                    )}
                   </CardTitle>
+                  {assessmentDbLoading && <p className="text-[11px] text-emerald-700">Loading from database...</p>}
                 </CardHeader>
               </Card>
               <Card className="border-emerald-100">
                 <CardHeader className="pb-2">
                   <CardDescription className="text-xs">Annual savings (slider model)</CardDescription>
                   <CardTitle className="text-2xl text-emerald-900">
-                    {sizingSummary ? formatCurrency(sizingSummary.annualSavings) : "—"}
+                    {assessmentDbLoading ? (
+                      <span className="inline-block h-8 w-32 animate-pulse rounded bg-emerald-100" />
+                    ) : resolvedSizingSummary ? (
+                      formatCurrency(resolvedSizingSummary.annualSavings)
+                    ) : (
+                      "—"
+                    )}
                   </CardTitle>
+                  {assessmentDbLoading && <p className="text-[11px] text-emerald-700">Loading from database...</p>}
                 </CardHeader>
               </Card>
               <Card className="border-emerald-100">
                 <CardHeader className="pb-2">
                   <CardDescription className="text-xs">Operational score (BMI)</CardDescription>
                   <CardTitle className="text-2xl text-emerald-900">
-                    {efficiencyScore !== null ? `${efficiencyScore}%` : "—"}
+                    {assessmentDbLoading ? (
+                      <span className="inline-block h-8 w-20 animate-pulse rounded bg-emerald-100" />
+                    ) : efficiencyScore !== null ? (
+                      `${efficiencyScore}%`
+                    ) : (
+                      "—"
+                    )}
                   </CardTitle>
+                  {assessmentDbLoading && <p className="text-[11px] text-emerald-700">Loading from database...</p>}
                 </CardHeader>
               </Card>
               {!isEnergyOnly && (
@@ -733,7 +884,13 @@ export function FacilityIntelligencePlatform({
                   <CardHeader className="pb-2">
                     <CardDescription className="text-xs">Climate resilience score</CardDescription>
                     <CardTitle className="text-2xl text-emerald-900">
-                      {climateResilienceScore !== null ? climateResilienceScore : "—"}
+                      {assessmentDbLoading ? (
+                        <span className="inline-block h-8 w-20 animate-pulse rounded bg-emerald-100" />
+                      ) : climateResilienceScore !== null ? (
+                        climateResilienceScore
+                      ) : (
+                        "—"
+                      )}
                     </CardTitle>
                     <p className="text-[11px] text-muted-foreground">
                       {facilityId
@@ -839,45 +996,87 @@ export function FacilityIntelligencePlatform({
             <Button size="sm" variant="outline" className="border-emerald-200" onClick={() => onNavigate("analyze")}>
               View charts
             </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-emerald-200"
+              loading={saveSnapshotBusy}
+              disabled={!assessmentCycleId}
+              onClick={() => void handleSaveSnapshot()}
+            >
+              Save to Database
+            </Button>
           </div>
         </TabsContent>
 
         <TabsContent value="assess" className="space-y-4 mt-4">
-          {facilityId && assessmentCyclesList.length > 0 && (
+          {(facilityId || isAdmin) && assessmentCyclesList.length > 0 && (
             <Card className="border-emerald-100 bg-white/90">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm">Assessment record</CardTitle>
                 <CardDescription className="text-xs">
-                  View previous saved data or the current cycle. Re-assess starts a new cycle after you have finished the
-                  checklist.
+                  Select assessment history by saved date. Re-assess starts a new cycle after you finish the checklist.
                 </CardDescription>
               </CardHeader>
-              <CardContent className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-                <div className="space-y-1.5 min-w-[min(100%,280px)] flex-1 max-w-md">
-                  <Label className="text-xs">View data for</Label>
-                  <Select
-                    value={assessmentCycleId ?? ""}
-                    onValueChange={(id) => setAssessmentCycleId(id)}
-                    disabled={reassessBusy}
-                  >
-                    <SelectTrigger className="h-9 text-xs">
-                      <SelectValue placeholder="Select assessment" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {assessmentCyclesList.map((c) => (
-                        <SelectItem key={c.id} value={c.id}>
-                          {formatCycleLabel(c)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+              <CardContent className="flex flex-col gap-3">
+                <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
+                  <div className="space-y-1.5 min-w-[min(100%,240px)] flex-1 max-w-[280px]">
+                    <Label className="text-xs">Filter label (date range)</Label>
+                    <Select value={dateRangeFilter} onValueChange={(value) => setDateRangeFilter(value as typeof dateRangeFilter)}>
+                      <SelectTrigger className="h-9 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All dates</SelectItem>
+                        <SelectItem value="30d">Last 30 days</SelectItem>
+                        <SelectItem value="90d">Last 90 days</SelectItem>
+                        <SelectItem value="365d">Last 12 months</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  {assessmentReadOnly && (
-                    <Badge variant="secondary" className="text-[10px]">
-                      Read-only (previous submission)
-                    </Badge>
-                  )}
+                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+                  <div className="space-y-1.5 min-w-[min(100%,280px)] flex-1 max-w-md">
+                    <Label className="text-xs">{isAdmin ? "View assessment (facility + date)" : "View assessment date"}</Label>
+                    <Select
+                      value={assessmentCycleId ?? ""}
+                      onValueChange={(id) => setAssessmentCycleId(id)}
+                      disabled={reassessBusy}
+                    >
+                      <SelectTrigger className="h-9 text-xs">
+                        <SelectValue placeholder="Select assessment" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {filteredAssessmentCycles.length > 0 ? (
+                          filteredAssessmentCycles.map((c) => (
+                            <SelectItem key={c.id} value={c.id}>
+                              {formatCycleLabel(c)}
+                            </SelectItem>
+                          ))
+                        ) : (
+                          <div className="px-2 py-1 text-xs text-muted-foreground">No matching assessments</div>
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {assessmentReadOnly && (
+                      <Badge variant="secondary" className="text-[10px]">
+                        Read-only (previous submission)
+                      </Badge>
+                    )}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="border-emerald-200"
+                      loading={saveSnapshotBusy}
+                      disabled={!assessmentCycleId}
+                      onClick={() => void handleSaveSnapshot()}
+                    >
+                      <Database className="h-4 w-4 mr-1" aria-hidden />
+                      Save to Database
+                    </Button>
                   {!assessmentReadOnly && completion.assessDone && (
                     <Button
                       type="button"
@@ -891,6 +1090,7 @@ export function FacilityIntelligencePlatform({
                       Re-assess
                     </Button>
                   )}
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -1007,8 +1207,8 @@ export function FacilityIntelligencePlatform({
         <TabsContent value="analyze" className="mt-4">
           <div className="space-y-4">
             <IntelligenceChartGrid
-              meu={meuSummary}
-              sizing={sizingSummary}
+              meu={resolvedMeuSummary}
+              sizing={resolvedSizingSummary}
               facilityExtras={facilityCtx ?? undefined}
               resilienceScore={climateResilienceScore}
               recommendations={recommendations}
@@ -1038,6 +1238,16 @@ export function FacilityIntelligencePlatform({
             Ranked recommendations with explainability. Owners and due dates are saved to your assessment cycle.
           </p>
           <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-emerald-200"
+              loading={saveSnapshotBusy}
+              disabled={!assessmentCycleId}
+              onClick={() => void handleSaveSnapshot()}
+            >
+              Save to Database
+            </Button>
             <Button
               size="sm"
               className="bg-emerald-600 hover:bg-emerald-700"
@@ -1225,7 +1435,7 @@ export function FacilityIntelligencePlatform({
                 <CardHeader className="pb-2">
                   <CardDescription className="text-xs">Total daily energy</CardDescription>
                   <CardTitle className="text-2xl text-emerald-900">
-                    {sizingSummary ? `${sizingSummary.totalDailyLoad.toFixed(1)} kWh/d` : "—"}
+                    {resolvedSizingSummary ? `${resolvedSizingSummary.totalDailyLoad.toFixed(1)} kWh/d` : "—"}
                   </CardTitle>
                 </CardHeader>
               </Card>
@@ -1233,7 +1443,7 @@ export function FacilityIntelligencePlatform({
                 <CardHeader className="pb-2">
                   <CardDescription className="text-xs">Indicative solar</CardDescription>
                   <CardTitle className="text-2xl text-emerald-900">
-                    {sizingSummary ? `${sizingSummary.solarArraySize.toFixed(1)} kW` : "—"}
+                    {resolvedSizingSummary ? `${resolvedSizingSummary.solarArraySize.toFixed(1)} kW` : "—"}
                   </CardTitle>
                 </CardHeader>
               </Card>
@@ -1241,7 +1451,7 @@ export function FacilityIntelligencePlatform({
                 <CardHeader className="pb-2">
                   <CardDescription className="text-xs">Annual savings</CardDescription>
                   <CardTitle className="text-2xl text-emerald-900">
-                    {sizingSummary ? formatCurrency(sizingSummary.annualSavings) : "—"}
+                    {resolvedSizingSummary ? formatCurrency(resolvedSizingSummary.annualSavings) : "—"}
                   </CardTitle>
                 </CardHeader>
               </Card>
@@ -1260,7 +1470,7 @@ export function FacilityIntelligencePlatform({
                 <CardHeader className="pb-2">
                   <CardDescription className="text-xs">Total daily energy</CardDescription>
                   <CardTitle className="text-2xl text-emerald-900">
-                    {sizingSummary ? `${sizingSummary.totalDailyLoad.toFixed(1)} kWh/d` : "—"}
+                    {resolvedSizingSummary ? `${resolvedSizingSummary.totalDailyLoad.toFixed(1)} kWh/d` : "—"}
                   </CardTitle>
                 </CardHeader>
               </Card>
@@ -1268,7 +1478,7 @@ export function FacilityIntelligencePlatform({
                 <CardHeader className="pb-2">
                   <CardDescription className="text-xs">Indicative solar</CardDescription>
                   <CardTitle className="text-2xl text-emerald-900">
-                    {sizingSummary ? `${sizingSummary.solarArraySize.toFixed(1)} kW` : "—"}
+                    {resolvedSizingSummary ? `${resolvedSizingSummary.solarArraySize.toFixed(1)} kW` : "—"}
                   </CardTitle>
                 </CardHeader>
               </Card>
@@ -1276,7 +1486,7 @@ export function FacilityIntelligencePlatform({
                 <CardHeader className="pb-2">
                   <CardDescription className="text-xs">Annual savings</CardDescription>
                   <CardTitle className="text-2xl text-emerald-900">
-                    {sizingSummary ? formatCurrency(sizingSummary.annualSavings) : "—"}
+                    {resolvedSizingSummary ? formatCurrency(resolvedSizingSummary.annualSavings) : "—"}
                   </CardTitle>
                 </CardHeader>
               </Card>
@@ -1311,32 +1521,32 @@ export function FacilityIntelligencePlatform({
               <CardDescription className="text-xs">Text snapshot — pair with charts in Analyze and PDF from design engine</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3 text-sm text-gray-700">
-              {sizingSummary && (
+              {resolvedSizingSummary && (
                 <p>
-                  Estimated demand <span className="font-semibold">{sizingSummary.totalDailyLoad.toFixed(1)} kWh/day</span>
-                  , indicative PV <span className="font-semibold">{sizingSummary.solarArraySize.toFixed(1)} kW</span>,
+                  Estimated demand <span className="font-semibold">{resolvedSizingSummary.totalDailyLoad.toFixed(1)} kWh/day</span>
+                  , indicative PV <span className="font-semibold">{resolvedSizingSummary.solarArraySize.toFixed(1)} kW</span>,
                   annual savings (model){" "}
-                  <span className="font-semibold">{formatCurrency(sizingSummary.annualSavings)}</span>.
+                  <span className="font-semibold">{formatCurrency(resolvedSizingSummary.annualSavings)}</span>.
                 </p>
               )}
-              {meuSummary && meuSummary.totalDailyLoad > 0 && (
+              {resolvedMeuSummary && resolvedMeuSummary.totalDailyLoad > 0 && (
                 <p>
-                  Peak (all-on) ≈ <span className="font-semibold">{meuSummary.peakLoadKw.toFixed(2)} kW</span>. Critical +
+                  Peak (all-on) ≈ <span className="font-semibold">{resolvedMeuSummary.peakLoadKw.toFixed(2)} kW</span>. Critical +
                   essential loads ≈{" "}
                   <span className="font-semibold">
-                    {(meuSummary.criticalityBreakdown.critical + meuSummary.criticalityBreakdown.essential).toFixed(1)}{" "}
+                    {(resolvedMeuSummary.criticalityBreakdown.critical + resolvedMeuSummary.criticalityBreakdown.essential).toFixed(1)}{" "}
                     kWh/day
                   </span>
                   .
                 </p>
               )}
-              {bmiSummary != null && bmiSummary.score !== null && (
+              {resolvedBmiSummary != null && resolvedBmiSummary.score !== null && (
                 <p>
-                  Operational BMI <span className="font-semibold">{bmiSummary.score}/40</span>
-                  {bmiSummary.bmiPercent !== null && ` (${bmiSummary.bmiPercent}%)`}.
+                  Operational BMI <span className="font-semibold">{resolvedBmiSummary.score}/40</span>
+                  {resolvedBmiSummary.bmiPercent !== null && ` (${resolvedBmiSummary.bmiPercent}%)`}.
                 </p>
               )}
-              {!sizingSummary && !meuSummary?.totalDailyLoad && (
+              {!resolvedSizingSummary && !resolvedMeuSummary?.totalDailyLoad && (
                 <p className="text-muted-foreground">Complete the Assess tab to populate this report.</p>
               )}
             </CardContent>
@@ -1402,8 +1612,8 @@ export function FacilityIntelligencePlatform({
           )}
 
           <IntelligenceChartGrid
-            meu={meuSummary}
-            sizing={sizingSummary}
+            meu={resolvedMeuSummary}
+            sizing={resolvedSizingSummary}
             facilityExtras={facilityCtx ?? undefined}
             resilienceScore={persistedClimateScore?.rcs ?? climateResilienceScore}
             recommendations={recommendations}
