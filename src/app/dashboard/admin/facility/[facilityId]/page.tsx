@@ -31,7 +31,7 @@ import { FacilityDashboardContent } from '@/components/dashboard/facility-dashbo
 import { FacilityIntelligenceAdminReview } from '@/components/admin/facility-intelligence-admin-review'
 import { formatCurrency } from '@/lib/utils'
 
-type NavSection = 'overview' | 'devices' | 'energy' | 'energy-efficiency' | 'climate-resilience' | 'bills-payment' | 'notifications' | 'report' | 'carbon-credits' | 'subscription' | 'settings'
+type NavSection = 'overview' | 'devices' | 'energy' | 'energy-efficiency' | 'climate-resilience' | 'bills-payment' | 'notifications' | 'carbon-credits' | 'subscription' | 'settings'
 
 const navItems: { id: NavSection; label: string; icon: React.ElementType }[] = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
@@ -41,7 +41,6 @@ const navItems: { id: NavSection; label: string; icon: React.ElementType }[] = [
   { id: 'climate-resilience', label: 'Climate Resilience', icon: CloudSun },
   { id: 'bills-payment', label: 'Bills & Payment', icon: DollarSign },
   { id: 'notifications', label: 'Notifications & Alerts', icon: Bell },
-  { id: 'report', label: 'Report', icon: BarChart3 },
   { id: 'carbon-credits', label: 'Carbon Credits', icon: Activity },
   { id: 'subscription', label: 'Subscription', icon: Users },
 ]
@@ -61,7 +60,7 @@ export default function AdminFacilityDashboard() {
 
   useEffect(() => {
     const section = searchParams.get('section') as NavSection
-    if (section && ['overview', 'devices', 'energy', 'energy-efficiency', 'climate-resilience', 'bills-payment', 'contract-details', 'notifications', 'report', 'carbon-credits', 'subscription', 'settings'].includes(section)) {
+    if (section && ['overview', 'devices', 'energy', 'energy-efficiency', 'climate-resilience', 'bills-payment', 'contract-details', 'notifications', 'carbon-credits', 'subscription', 'settings'].includes(section)) {
       setActiveSection(section as NavSection)
     }
   }, [searchParams])

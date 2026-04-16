@@ -833,6 +833,23 @@ export function AfyaSolarSizingTool({
     setSaveDbLoading(true)
     setSaveDbError(null)
     try {
+      // Include operations + BMI trend so Overview can show operational charts/recommendations
+      // even when saving from the Cost tab before the user manually saves BMI.
+      let operationsData: unknown | null = null
+      let bmiTrendJson: unknown | null = null
+      if (assessmentCycleId) {
+        try {
+          const cycleEnergyRes = await fetch(`/api/assessment-cycles/${assessmentCycleId}/energy`, {
+            cache: "no-store",
+          })
+          const cycleEnergyJson = cycleEnergyRes.ok ? await cycleEnergyRes.json().catch(() => ({} as any)) : {}
+          operationsData = cycleEnergyJson?.operationsData ?? null
+          bmiTrendJson = cycleEnergyJson?.bmiTrendJson ?? null
+        } catch {
+          // best-effort only
+        }
+      }
+
       const res = await fetch(`/api/facility/${facilityId}/assessment-reports`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -851,6 +868,8 @@ export function AfyaSolarSizingTool({
             solarOffset,
             systemCost,
             quoteData,
+            operationsData,
+            bmiTrendJson,
           },
         }),
       })

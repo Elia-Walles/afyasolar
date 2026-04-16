@@ -68,67 +68,36 @@ export function FacilityCarbonCredits({ facilityId }: FacilityCarbonCreditsProps
   const { data: assessmentDevices = [], isLoading: devicesLoading } = useQuery({
     queryKey: ['facility-assessment-devices', facilityId],
     queryFn: async () => {
+      // Default list (used when a facility has no saved assessment snapshot yet).
+      const defaultDevices = [
+        { id: 'lighting', name: 'Lighting', type: 'default', powerW: '100', hoursPerDay: '12', kwhPerDay: 1.2, critical: false },
+        { id: 'vaccine-fridge', name: 'Vaccine Fridge', type: 'default', powerW: '150', hoursPerDay: '24', kwhPerDay: 3.6, critical: true },
+        { id: 'oxygen-concentrator', name: 'Oxygen Concentrator', type: 'default', powerW: '300', hoursPerDay: '8', kwhPerDay: 2.4, critical: true },
+        { id: 'autoclave', name: 'Autoclave', type: 'default', powerW: '2000', hoursPerDay: '1', kwhPerDay: 2.0, critical: false },
+        { id: 'ultrasound', name: 'Ultrasound', type: 'default', powerW: '500', hoursPerDay: '4', kwhPerDay: 2.0, critical: false },
+        { id: 'computers', name: 'Computers/ICT', type: 'default', powerW: '200', hoursPerDay: '8', kwhPerDay: 1.6, critical: false },
+      ]
+
       try {
-        console.log('Fetching devices for facility:', facilityId)
-        
-        // Always return default devices first, then try to enhance with assessment data
-        let devices = [
-          { id: 'lighting', name: 'Lighting', type: 'default', powerW: '100', hoursPerDay: '12', kwhPerDay: 1.2, critical: false },
-          { id: 'vaccine-fridge', name: 'Vaccine Fridge', type: 'default', powerW: '150', hoursPerDay: '24', kwhPerDay: 3.6, critical: true },
-          { id: 'oxygen-concentrator', name: 'Oxygen Concentrator', type: 'default', powerW: '300', hoursPerDay: '8', kwhPerDay: 2.4, critical: true },
-          { id: 'autoclave', name: 'Autoclave', type: 'default', powerW: '2000', hoursPerDay: '1', kwhPerDay: 2.0, critical: false },
-          { id: 'ultrasound', name: 'Ultrasound', type: 'default', powerW: '500', hoursPerDay: '4', kwhPerDay: 2.0, critical: false },
-          { id: 'computers', name: 'Computers/ICT', type: 'default', powerW: '200', hoursPerDay: '8', kwhPerDay: 1.6, critical: false }
-        ]
-        
-        // Try to get assessment cycles for the facility
-        try {
-          const cyclesResponse = await fetch(`/api/facility/${facilityId}/assessment-cycles`)
-          if (cyclesResponse.ok) {
-            const cyclesData = await cyclesResponse.json()
-            console.log('Assessment cycles:', cyclesData)
-            
-            if (cyclesData.cycles && cyclesData.cycles.length > 0) {
-              // Get the latest cycle
-              const latestCycle = cyclesData.cycles[0]
-              console.log('Latest cycle:', latestCycle)
-              
-              // Fetch energy assessment data for MEU (Major Energy Uses) devices
-              const energyResponse = await fetch(`/api/assessment-cycles/${latestCycle.id}/energy`)
-              if (energyResponse.ok) {
-                const energyData = await energyResponse.json()
-                console.log('Energy assessment data:', energyData)
-                
-                if (energyData.stateJson?.meuRows && energyData.stateJson.meuRows.length > 0) {
-                  // Replace default devices with assessment devices
-                  devices = energyData.stateJson.meuRows.map((row: any, index: number) => ({
-                    id: `meu-${index}`,
-                    name: row.equipment || `Device ${index + 1}`,
-                    type: 'energy-assessment',
-                    powerW: row.powerW || '0',
-                    hoursPerDay: row.hoursPerDay || '0',
-                    kwhPerDay: row.kwhPerDay || 0,
-                    critical: row.critical || false
-                  }))
-                  console.log('Using assessment devices:', devices)
-                }
-              }
-            }
-          }
-        } catch (assessmentError) {
-          console.log('Assessment data fetch failed, using default devices:', assessmentError)
-        }
-        
-        console.log('Final devices to return:', devices)
-        return devices
-      } catch (error) {
-        console.error('Failed to fetch assessment devices:', error)
-        // Return default devices on error
-        return [
-          { id: 'lighting', name: 'Lighting', type: 'default', powerW: '100', hoursPerDay: '12', kwhPerDay: 1.2, critical: false },
-          { id: 'vaccine-fridge', name: 'Vaccine Fridge', type: 'default', powerW: '150', hoursPerDay: '24', kwhPerDay: 3.6, critical: true },
-          { id: 'oxygen-concentrator', name: 'Oxygen Concentrator', type: 'default', powerW: '300', hoursPerDay: '8', kwhPerDay: 2.4, critical: true }
-        ]
+        const res = await fetch(`/api/facility/${facilityId}/assessment-reports`)
+        if (!res.ok) return defaultDevices
+        const json = await res.json().catch(() => ({} as any))
+        const payload = json?.latestEnergy?.payload
+
+        const topDevices: any[] = payload?.meuSummary?.topDevices
+        if (!Array.isArray(topDevices) || topDevices.length === 0) return defaultDevices
+
+        return topDevices.map((d: any, index: number) => ({
+          id: `meu-${index}`,
+          name: d?.name || `Device ${index + 1}`,
+          type: 'energy-assessment',
+          powerW: d?.wattage ? String(d.wattage) : '0',
+          hoursPerDay: '0',
+          kwhPerDay: Number(d?.dailyKwh ?? 0),
+          critical: Boolean(d?.criticality && String(d.criticality).toLowerCase().includes('critical')),
+        }))
+      } catch {
+        return defaultDevices
       }
     }
   })
@@ -200,8 +169,39 @@ export function FacilityCarbonCredits({ facilityId }: FacilityCarbonCreditsProps
   }
 
   const handleCalculateCredits = () => {
-    // Show custom modal notification instead of toast
-    setIsNotificationOpen(true)
+    if (!facilityId) return
+
+    // If the user didn't pick dates (as in your screenshot), we derive the date window server-side
+    // based on `selectedPeriod` (daily/weekly/monthly/yearly).
+    // Only require explicit dates when `selectedPeriod === "custom"`.
+    if (selectedPeriod === "custom" && (!startDate || !endDate)) {
+      toast.error("Select start date and end date for custom period.")
+      return
+    }
+
+    // Default device for carbon allocation:
+    // - "All Devices" should mean "whole facility" (ratio=1), not just the first MEU device.
+    // - Backend allocates by MEU device share only when deviceId matches `meu-<index>`.
+    let deviceIdToUse = selectedDevice
+    if (deviceSelectionMode === "all") {
+      deviceIdToUse = "facility-solar"
+    } else if (!deviceIdToUse || deviceIdToUse === "all") {
+      // For "single", fall back to the first available device when UI selection is missing.
+      deviceIdToUse = assessmentDevices?.[0]?.id ?? "facility-solar"
+    }
+
+    const request: any = {
+      deviceId: deviceIdToUse,
+      facilityId,
+      period: selectedPeriod,
+      gridEmissionFactor: 0.5,
+    }
+    if (selectedPeriod === "custom") {
+      request.startDate = startDate
+      request.endDate = endDate
+    }
+
+    calculateCreditsMutation.mutate(request)
   }
 
   const getStatusColor = (status: string) => {
@@ -300,30 +300,34 @@ export function FacilityCarbonCredits({ facilityId }: FacilityCarbonCreditsProps
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="grid grid-cols-4 items-center gap-4">
-                  <Label htmlFor="start-date" className="text-right">
-                    Start Date
-                  </Label>
-                  <Input
-                    id="start-date"
-                    type="date"
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                    className="col-span-3"
-                  />
-                </div>
-                <div className="grid grid-cols-4 items-center gap-4">
-                  <Label htmlFor="end-date" className="text-right">
-                    End Date
-                  </Label>
-                  <Input
-                    id="end-date"
-                    type="date"
-                    value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
-                    className="col-span-3"
-                  />
-                </div>
+                {selectedPeriod === "custom" && (
+                  <>
+                    <div className="grid grid-cols-4 items-center gap-4">
+                      <Label htmlFor="start-date" className="text-right">
+                        Start Date
+                      </Label>
+                      <Input
+                        id="start-date"
+                        type="date"
+                        value={startDate}
+                        onChange={(e) => setStartDate(e.target.value)}
+                        className="col-span-3"
+                      />
+                    </div>
+                    <div className="grid grid-cols-4 items-center gap-4">
+                      <Label htmlFor="end-date" className="text-right">
+                        End Date
+                      </Label>
+                      <Input
+                        id="end-date"
+                        type="date"
+                        value={endDate}
+                        onChange={(e) => setEndDate(e.target.value)}
+                        className="col-span-3"
+                      />
+                    </div>
+                  </>
+                )}
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setIsCalculatorOpen(false)}>

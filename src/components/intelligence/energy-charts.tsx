@@ -415,6 +415,7 @@ export function IntelligenceChartGrid({
   resilienceScore,
   recommendations,
   bmiTrend,
+  variant = "full",
 }: {
   meu: MeuSummary | null
   sizing: SizingSummary | null
@@ -428,6 +429,8 @@ export function IntelligenceChartGrid({
   resilienceScore?: number | null
   recommendations?: IntelligenceRecommendation[]
   bmiTrend?: { date: string; value: number }[]
+  /** full = all charts; overview = core assessment charts only */
+  variant?: "full" | "overview"
 }) {
   const annualGrid = sizing?.annualGridCost ?? 0
   const annualDiesel = sizing?.annualDieselCost ?? 0
@@ -490,65 +493,69 @@ export function IntelligenceChartGrid({
           />
         </CardContent>
       </Card>
-      <Card className="border-emerald-100 lg:col-span-2">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Savings bridge (simplified)</CardTitle>
-          <CardDescription className="text-xs">Current vs estimated after solar offset slider</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <SavingsWaterfallSimplified currentAnnual={currentAnnualForWaterfall} savingsAnnual={savingsAnnual} />
-        </CardContent>
-      </Card>
+      {variant === "full" && (
+        <>
+          <Card className="border-emerald-100 lg:col-span-2">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">Savings bridge (simplified)</CardTitle>
+              <CardDescription className="text-xs">Current vs estimated after solar offset slider</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <SavingsWaterfallSimplified currentAnnual={currentAnnualForWaterfall} savingsAnnual={savingsAnnual} />
+            </CardContent>
+          </Card>
 
-      <Card className="border-emerald-100">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Outage exposure timeline</CardTitle>
-          <CardDescription className="text-xs">Outage hours vs backup covered vs unprotected</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <OutageExposureTimeline outageHoursPerDay={averageOutageHours} backupHoursAvailable={4} />
-        </CardContent>
-      </Card>
+          <Card className="border-emerald-100">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">Outage exposure timeline</CardTitle>
+              <CardDescription className="text-xs">Outage hours vs backup covered vs unprotected</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <OutageExposureTimeline outageHoursPerDay={averageOutageHours} backupHoursAvailable={4} />
+            </CardContent>
+          </Card>
 
-      <Card className="border-emerald-100">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Solar coverage simulation</CardTitle>
-          <CardDescription className="text-xs">Illustrative: demand vs solar + battery contribution</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <SolarCoverageSimulationChart sizing={sizing} />
-        </CardContent>
-      </Card>
+          <Card className="border-emerald-100">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">Solar coverage simulation</CardTitle>
+              <CardDescription className="text-xs">Illustrative: demand vs solar + battery contribution</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <SolarCoverageSimulationChart sizing={sizing} />
+            </CardContent>
+          </Card>
 
-      <Card className="border-emerald-100 lg:col-span-2">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Energy–resilience opportunity matrix</CardTitle>
-          <CardDescription className="text-xs">Cost savings potential vs resilience score</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <OpportunityMatrix sizing={sizing} resilienceScore={resilienceScore ?? null} />
-        </CardContent>
-      </Card>
+          <Card className="border-emerald-100 lg:col-span-2">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">Energy–resilience opportunity matrix</CardTitle>
+              <CardDescription className="text-xs">Cost savings potential vs resilience score</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <OpportunityMatrix sizing={sizing} resilienceScore={resilienceScore ?? null} />
+            </CardContent>
+          </Card>
 
-      <Card className="border-emerald-100 lg:col-span-2">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Action priority chart</CardTitle>
-          <CardDescription className="text-xs">Ranked actions by risk + impact + feasibility (proxy)</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <ActionPriorityChart recommendations={recommendations ?? []} />
-        </CardContent>
-      </Card>
+          <Card className="border-emerald-100 lg:col-span-2">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">Action priority chart</CardTitle>
+              <CardDescription className="text-xs">Ranked actions by risk + impact + feasibility (proxy)</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ActionPriorityChart recommendations={recommendations ?? []} />
+            </CardContent>
+          </Card>
 
-      <Card className="border-emerald-100 lg:col-span-2">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Efficiency score trend</CardTitle>
-          <CardDescription className="text-xs">Before/after over reassessments (local history)</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <ImprovementTimelineChart points={bmiTrend ?? []} />
-        </CardContent>
-      </Card>
+          <Card className="border-emerald-100 lg:col-span-2">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">Efficiency score trend</CardTitle>
+              <CardDescription className="text-xs">Before/after over reassessments (local history)</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ImprovementTimelineChart points={bmiTrend ?? []} />
+            </CardContent>
+          </Card>
+        </>
+      )}
     </div>
   )
 }

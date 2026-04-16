@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
-import { AlertTriangle, CheckCircle2, FileUp, Globe } from "lucide-react"
+import { AlertTriangle, CheckCircle2, FileUp, Globe, Database } from "lucide-react"
 
 type Lang = "en" | "sw"
 
@@ -366,6 +366,9 @@ export function ClimateResilienceAssessment({
   const [responses, setResponses] = useState<ResponseMap>({})
   const [evidence, setEvidence] = useState<EvidenceItem[]>([])
   const [remoteLoaded, setRemoteLoaded] = useState<boolean>(false)
+  const [saveBusy, setSaveBusy] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [saveSuccessAt, setSaveSuccessAt] = useState<number | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -470,6 +473,34 @@ export function ClimateResilienceAssessment({
 
   const t = (en: string, sw: string) => (lang === "en" ? en : sw)
 
+  const buildResponseRows = () => {
+    return QUESTIONS.map((q) => {
+      const r = responses[q.code]
+      const choice = q.choices.find((c) => c.id === r?.answerId)
+      if (!r?.answerId || !choice) return null
+      return {
+        moduleCode: q.module,
+        questionCode: q.code,
+        answerValue: r.answerId,
+        score: clamp(choice.score, 0, q.max),
+        scoreMax: q.max,
+        note: r.note ?? null,
+        confidence: 100,
+        isRedFlag: Boolean(q.redFlagIfAnswerId && r.answerId === q.redFlagIfAnswerId),
+      }
+    }).filter(Boolean) as any[]
+  }
+
+  const buildEvidenceRows = () => {
+    return evidence.map((e) => ({
+      questionCode: e.questionCode,
+      type: e.type,
+      fileUrl: e.fileUrl ?? null,
+      note: e.note ?? null,
+      capturedAt: e.capturedAt,
+    }))
+  }
+
   useEffect(() => {
     onCapacityScoreChange?.(answeredCount > 0 ? resilienceCapacityScore : null)
   }, [answeredCount, onCapacityScoreChange, resilienceCapacityScore])
@@ -533,6 +564,64 @@ export function ClimateResilienceAssessment({
     }
   }, [assessmentCycleId, evidence, remoteLoaded, responses, readOnly])
 
+  const saveClimateToDatabase = async () => {
+    if (readOnly) return
+    if (!assessmentCycleId) return
+    if (!remoteLoaded) {
+      setSaveError("Loading saved climate record first...")
+      return
+    }
+
+    const responseRows = buildResponseRows()
+    if (responseRows.length === 0) {
+      setSaveError("Select answers before saving climate.")
+      return
+    }
+
+    setSaveBusy(true)
+    setSaveError(null)
+    try {
+      const evidenceRows = buildEvidenceRows()
+
+      await fetch(`/api/assessment-cycles/${assessmentCycleId}/climate`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ responses: responseRows, evidence: evidenceRows }),
+      })
+
+      await fetch(`/api/assessment-cycles/${assessmentCycleId}/climate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ responses: responseRows }),
+      })
+
+      const snapRes = await fetch(`/api/assessment-cycles/${assessmentCycleId}/climate`, { cache: "no-store" })
+      const snapJson = await snapRes.json().catch(() => ({} as any))
+      if (!snapRes.ok) throw new Error((snapJson as any)?.error || "Failed to compute climate snapshot")
+
+      const saveRes = await fetch(`/api/facility/${facilityId}/assessment-reports`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sourceVersion: "3.0",
+          assessmentCycleId,
+          climate: snapJson,
+        }),
+      })
+      const saveJson = await saveRes.json().catch(() => ({} as any))
+      if (!saveRes.ok || !saveJson?.success) {
+        throw new Error((saveJson as any)?.error || "Failed to save climate to database")
+      }
+
+      setSaveSuccessAt(Date.now())
+      window.setTimeout(() => setSaveSuccessAt(null), 2000)
+    } catch (e: any) {
+      setSaveError(e?.message || "Failed to save climate")
+    } finally {
+      setSaveBusy(false)
+    }
+  }
+
   const addEvidence = (questionCode: string, item: Omit<EvidenceItem, "capturedAt" | "questionCode">) => {
     setEvidence((prev) => [
       { questionCode, capturedAt: new Date().toISOString(), ...item },
@@ -562,7 +651,25 @@ export function ClimateResilienceAssessment({
           <Globe className="h-4 w-4 mr-1" />
           {lang === "en" ? "SW" : "EN"}
         </Button>
+        {!readOnly && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={saveBusy || !assessmentCycleId}
+            onClick={() => void saveClimateToDatabase()}
+          >
+            <Database className="h-4 w-4 mr-1" aria-hidden />
+            {saveBusy ? "Saving..." : "Save Climate to Database"}
+          </Button>
+        )}
       </div>
+      {(saveError || saveSuccessAt) && (
+        <div className="text-xs">
+          {saveError && <span className="text-red-600">{saveError}</span>}
+          {saveSuccessAt && <span className="text-emerald-700">Climate saved to database.</span>}
+        </div>
+      )}
 
       <fieldset
         disabled={readOnly}

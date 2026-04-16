@@ -220,7 +220,38 @@ export function FourPointAssessment({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ operationsData: buildOperationsData() }),
       })
+
+      // When user clicks manual save, also persist into facility_energy_assessments
+      // so the Dashboard Overview can load it after refresh.
       if (showFeedback) {
+        const energyRes = await fetch(`/api/assessment-cycles/${assessmentCycleId}/energy`, { cache: "no-store" })
+        const energyJson = await energyRes.json().catch(() => ({} as any))
+        const facilityIdFromEnergy = energyJson?.facilityId
+        if (energyRes.ok && typeof facilityIdFromEnergy === "string" && facilityIdFromEnergy) {
+          // Preserve quoteData/cost inputs from the latest saved energy snapshot,
+          // while updating only the operational (BMI) portion.
+          const reportRes = await fetch(`/api/facility/${facilityIdFromEnergy}/assessment-reports`, { cache: "no-store" })
+          const reportJson = await reportRes.json().catch(() => ({} as any))
+          const latestEnergyPayload = reportJson?.latestEnergy?.payload ?? null
+          const mergedEnergyPayload =
+            latestEnergyPayload && typeof latestEnergyPayload === "object" ? { ...latestEnergyPayload, ...energyJson } : energyJson
+
+          const saveRes = await fetch(`/api/facility/${facilityIdFromEnergy}/assessment-reports`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              sourceVersion: "3.0",
+              assessmentCycleId,
+              energy: mergedEnergyPayload,
+              climate: null,
+            }),
+          })
+          const saveJson = await saveRes.json().catch(() => ({} as any))
+          if (!saveRes.ok || !saveJson?.success) {
+            throw new Error(saveJson?.error || "Failed to save energy snapshot")
+          }
+        }
+
         setSaveStatus("saved")
         window.setTimeout(() => setSaveStatus("idle"), 1500)
       }

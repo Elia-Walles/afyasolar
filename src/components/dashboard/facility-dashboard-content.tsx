@@ -50,7 +50,8 @@ import { FacilityMeterEfficiencyDashboard } from "@/components/efficiency/facili
 import { SolarPackagesSelection } from "@/components/solar/solar-packages-selection"
 import type { SizingSummary, MeuSummary } from "@/components/solar/afya-solar-sizing-tool"
 import { FacilityIntelligencePlatform } from "@/components/intelligence/facility-intelligence-platform"
-import type { SectionScores } from "@/lib/intelligence/recommendations"
+import { IntelligenceChartGrid } from "@/components/intelligence/energy-charts"
+import { buildIntelligenceRecommendations, type SectionScores } from "@/lib/intelligence/recommendations"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useDevices } from "@/hooks/use-devices"
 import { useBills } from "@/hooks/use-bills"
@@ -67,8 +68,6 @@ import { toast } from "sonner"
 import { ServiceAccessPaymentDialog } from "@/components/services/service-access-payment-dialog"
 import {
   ResponsiveContainer,
-  AreaChart,
-  Area,
   BarChart,
   Bar,
   XAxis,
@@ -85,7 +84,7 @@ interface FacilityDashboardContentProps {
   onSectionChange?: (section: NavSection) => void
 }
 
-type NavSection = 'overview' | 'package-selection' | 'devices' | 'energy' | 'energy-efficiency' | 'climate-resilience' | 'bills-payment' | 'notifications' | 'report' | 'carbon-credits' | 'subscription' | 'settings'
+type NavSection = 'overview' | 'package-selection' | 'devices' | 'energy' | 'energy-efficiency' | 'climate-resilience' | 'bills-payment' | 'notifications' | 'carbon-credits' | 'subscription' | 'settings'
 
 interface FacilityNotification {
   id: string
@@ -110,7 +109,6 @@ const navItems: { id: NavSection; label: string; icon: React.ElementType }[] = [
   { id: 'climate-resilience', label: 'Climate Resilience', icon: CloudSun },
   { id: 'bills-payment', label: 'Bills & Payment', icon: Receipt },
   { id: 'notifications', label: 'Notifications', icon: Bell },
-  { id: 'report', label: 'Report', icon: FileText },
   { id: 'carbon-credits', label: 'Carbon Credits', icon: Leaf },
 ]
 
@@ -211,9 +209,6 @@ export function FacilityDashboardContent({
       const section = searchParams?.get('section')
       if (section === 'subscription') {
         setInternalActiveSection('subscription')
-      }
-      if (section === 'report') {
-        setInternalActiveSection('report')
       }
     }
   }, [searchParams, adminMode])
@@ -379,6 +374,24 @@ export function FacilityDashboardContent({
     (assessmentOverviewSnapshot?.energy as any)?.operationsData ??
     (assessmentOverviewSnapshot?.energy as any)?.operations ??
     null
+  const persistedMeuSummary =
+    (assessmentOverviewSnapshot?.energy as any)?.meuSummary ??
+    (assessmentOverviewSnapshot?.energy as any)?.meu ??
+    (assessmentOverviewSnapshot?.energy as any)?.sizingData?.meuSummary ??
+    null
+  const persistedFacilityExtras =
+    (assessmentOverviewSnapshot?.energy as any)?.facilityData ??
+    (assessmentOverviewSnapshot?.energy as any)?.facilityContext ??
+    (assessmentOverviewSnapshot?.energy as any)?.sizingData?.facilityData ??
+    null
+  const persistedQuoteData =
+    (assessmentOverviewSnapshot?.energy as any)?.quoteData ??
+    (assessmentOverviewSnapshot?.energy as any)?.quote ??
+    null
+  const persistedBmiTrendJson =
+    (assessmentOverviewSnapshot?.energy as any)?.bmiTrendJson ??
+    (assessmentOverviewSnapshot?.energy as any)?.bmiTrend ??
+    null
   const persistedAssessmentScore =
     typeof persistedOperations?.assessmentScore === "number" ? Number(persistedOperations.assessmentScore) : null
   const persistedBmiPercent = persistedAssessmentScore !== null ? Math.round((persistedAssessmentScore / 40) * 100) : null
@@ -394,33 +407,57 @@ export function FacilityDashboardContent({
   const assessmentSnapshotBusy = isAssessmentSnapshotLoading || isAssessmentSnapshotFetching
   const hasAssessmentSnapshot = Boolean(assessmentOverviewSnapshot?.energy || assessmentOverviewSnapshot?.climate)
 
+  const persistedSectionScores: SectionScores | null =
+    persistedOperations?.sectionScores && typeof persistedOperations.sectionScores === "object"
+      ? (persistedOperations.sectionScores as SectionScores)
+      : null
+
+  const persistedBmiForRecommendations =
+    persistedAssessmentScore !== null ? { score: persistedAssessmentScore, bmiPercent: persistedBmiPercent } : null
+
+  const recommendations = buildIntelligenceRecommendations(
+    persistedSizingSummary as SizingSummary | null,
+    persistedMeuSummary as MeuSummary | null,
+    persistedBmiForRecommendations,
+    persistedSectionScores
+  )
+
+  const bmiTrend =
+    Array.isArray(persistedBmiTrendJson) && persistedBmiTrendJson.length > 0
+      ? (persistedBmiTrendJson as { date: string; value: number }[])
+      : undefined
+
+  const monthlyBaselineCostTzs =
+    typeof persistedQuoteData?.current_energy_cost?.total_baseline_cost_monthly_tzs === "number"
+      ? Number(persistedQuoteData.current_energy_cost.total_baseline_cost_monthly_tzs)
+      : null
+  const monthlyAfterSolarCostTzs =
+    typeof persistedQuoteData?.after_solar_cost?.total_cost_after_solar_monthly_tzs === "number"
+      ? Number(persistedQuoteData.after_solar_cost.total_cost_after_solar_monthly_tzs)
+      : null
+  const monthlySavingsGrossTzs =
+    typeof persistedQuoteData?.monthly_savings?.gross_monthly_savings_tzs === "number"
+      ? Number(persistedQuoteData.monthly_savings.gross_monthly_savings_tzs)
+      : null
+  const cashPaybackMonths =
+    typeof persistedQuoteData?.financing_comparison?.cash_payback_months === "number"
+      ? Number(persistedQuoteData.financing_comparison.cash_payback_months)
+      : null
+
+  const monthlySavingsNetTzs =
+    monthlyBaselineCostTzs !== null && monthlyAfterSolarCostTzs !== null
+      ? Math.max(0, monthlyBaselineCostTzs - monthlyAfterSolarCostTzs)
+      : monthlySavingsGrossTzs
+
   // Prefer persisted assessment-cycle values so overview survives refresh without live telemetry.
   const sessionBmiPercent = bmiSummary?.score ? Math.round((bmiSummary.score / 40) * 100) : null
-  const energyEfficiencyScore = sessionBmiPercent ?? persistedBmiPercent ?? Math.round(metrics.efficiency || 0)
+  // Overview must be driven by saved assessments (no telemetry fallback for these metrics).
+  const energyEfficiencyScore = sessionBmiPercent ?? persistedBmiPercent
   const sessionClimateScore = sectionScores
     ? Math.round((sectionScores.reliability + sectionScores.wastage + sectionScores.thermal + sectionScores.behavior) / 4)
     : null
-  const climateResilienceScore = sessionClimateScore ?? persistedClimateRcs ?? 0
-  const displayTotalConsumption = metrics.totalConsumption > 0 ? metrics.totalConsumption : assessedDailyLoadKwh ?? 0
-
-  const overviewTrends = useMemo(() => {
-    const rows = (energyData || [])
-      .slice(-96) // keep it lightweight in overview
-      .map((d: any) => {
-        const ts = new Date(d.timestamp)
-        const label = ts.toLocaleDateString(undefined, { month: "short", day: "2-digit" })
-        return {
-          label,
-          consumption: Number(d.energy) || 0,
-          solar: Number(d.solarGeneration) || 0,
-          power: Number(d.power) || 0,
-        }
-      })
-
-    // downsample to avoid dense charts
-    const step = rows.length > 24 ? Math.ceil(rows.length / 24) : 1
-    return rows.filter((_: any, idx: number) => idx % step === 0)
-  }, [energyData])
+  const climateResilienceScore = sessionClimateScore ?? persistedClimateRcs
+  const displayTotalConsumption = assessedDailyLoadKwh
 
   const billingSummary = useMemo(() => {
     const list = Array.isArray(bills) ? bills : []
@@ -503,7 +540,8 @@ export function FacilityDashboardContent({
   }, [overviewCarbonCredits])
 
   // Wire carbon credit card to actual assessment data
-  const carbonCreditEarnedCalc = creditsSummary.totalCredits ? creditsSummary.totalCredits.toFixed(3) : Math.floor((metrics.totalSolarGeneration || 0) / 1000)
+  const carbonCreditEarnedCalc =
+    creditsSummary.totalCredits !== null && creditsSummary.totalCredits !== undefined ? creditsSummary.totalCredits.toFixed(3) : "N/A"
 
   return (
     <div className="h-screen bg-gray-50 flex overflow-hidden">
@@ -743,7 +781,7 @@ export function FacilityDashboardContent({
                         {assessmentSnapshotBusy ? (
                           <span className="inline-block h-7 w-16 animate-pulse rounded bg-emerald-100" />
                         ) : (
-                          `${energyEfficiencyScore}%`
+                          energyEfficiencyScore !== null && energyEfficiencyScore !== undefined ? `${energyEfficiencyScore}%` : "N/A"
                         )}
                       </div>
                       <div className="flex items-center justify-center gap-1 text-[11px] text-emerald-700">
@@ -753,7 +791,7 @@ export function FacilityDashboardContent({
                       <div className="h-1.5 w-full rounded-full bg-emerald-100 overflow-hidden">
                         <div
                           className={`h-full bg-emerald-500 transition-all ${assessmentSnapshotBusy ? "animate-pulse" : ""}`}
-                          style={{ width: `${Math.min(energyEfficiencyScore, 100)}%` }}
+                          style={{ width: `${Math.min(energyEfficiencyScore ?? 0, 100)}%` }}
                         />
                       </div>
                       {assessmentSnapshotBusy && <p className="text-[10px] text-emerald-600">Loading from database...</p>}
@@ -772,7 +810,11 @@ export function FacilityDashboardContent({
                     </CardHeader>
                     <CardContent className="relative z-10 px-3 pb-3 pt-0 text-center space-y-2">
                       <div className="text-2xl font-extrabold text-blue-700">
-                        {carbonCreditEarnedCalc}
+                      {assessmentSnapshotBusy ? (
+                        <span className="inline-block h-7 w-16 animate-pulse rounded bg-blue-100" />
+                      ) : (
+                        carbonCreditEarnedCalc
+                      )}
                       </div>
                       <div className="flex items-center justify-center gap-1 text-[11px] text-blue-700">
                         <TrendingUp className="h-3 w-3" />
@@ -796,7 +838,7 @@ export function FacilityDashboardContent({
                         {assessmentSnapshotBusy ? (
                           <span className="inline-block h-7 w-16 animate-pulse rounded bg-purple-100" />
                         ) : (
-                          `${climateResilienceScore}%`
+                          climateResilienceScore !== null && climateResilienceScore !== undefined ? `${climateResilienceScore}%` : "N/A"
                         )}
                       </div>
                       <div className="flex items-center justify-center gap-1 text-[11px] text-purple-700">
@@ -806,7 +848,7 @@ export function FacilityDashboardContent({
                       <div className="h-1.5 w-full rounded-full bg-purple-100 overflow-hidden">
                         <div
                           className={`h-full bg-purple-500 transition-all ${assessmentSnapshotBusy ? "animate-pulse" : ""}`}
-                          style={{ width: `${Math.min(climateResilienceScore, 100)}%` }}
+                          style={{ width: `${Math.min(climateResilienceScore ?? 0, 100)}%` }}
                         />
                       </div>
                       {assessmentSnapshotBusy && <p className="text-[10px] text-purple-600">Loading from database...</p>}
@@ -824,19 +866,100 @@ export function FacilityDashboardContent({
                       <div className="text-lg font-bold text-gray-900">
                         {assessmentSnapshotBusy ? (
                           <span className="inline-block h-6 w-24 animate-pulse rounded bg-gray-100" />
+                        ) : displayTotalConsumption !== null ? (
+                          `${displayTotalConsumption.toFixed(1)} kWh/d`
                         ) : (
-                          `${displayTotalConsumption.toFixed(1)} kWh`
+                          "N/A"
                         )}
                       </div>
                       <p className="text-[11px] text-gray-500 mt-1">
-                        {metrics.totalConsumption > 0
-                          ? timeRange === 'today'
-                            ? 'Today'
-                            : timeRange === 'week'
-                              ? 'This week'
-                              : 'This month'
-                          : 'From latest assessment'}
+                        {assessmentSnapshotBusy ? "Loading from database..." : "From your latest sizing assessment"}
                       </p>
+                    </CardContent>
+                  </Card>
+
+                  {/* Energy assessment / cost calculation snapshot */}
+                  <Card className={`${panelCardClass} rounded-2xl bg-white/80`}>
+                    <CardHeader className="flex flex-col items-center pb-1">
+                      <Sparkles className="h-4 w-4 text-emerald-600" />
+                      <CardTitle className="text-[11px] font-semibold text-gray-700 text-center mt-2 tracking-wide uppercase">
+                        BMI Score
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-2 text-center">
+                      <div className="text-lg font-bold text-gray-900">
+                        {assessmentSnapshotBusy ? (
+                          <span className="inline-block h-6 w-20 animate-pulse rounded bg-gray-100" />
+                        ) : persistedAssessmentScore !== null ? (
+                          `${persistedAssessmentScore}/40`
+                        ) : (
+                          "N/A"
+                        )}
+                      </div>
+                      <p className="text-[11px] text-gray-500 mt-1">Operational efficiency (BMI)</p>
+                    </CardContent>
+                  </Card>
+
+                  <Card className={`${panelCardClass} rounded-2xl bg-white/80`}>
+                    <CardHeader className="flex flex-col items-center pb-1">
+                      <Sun className="h-4 w-4 text-orange-500" />
+                      <CardTitle className="text-[11px] font-semibold text-gray-700 text-center mt-2 tracking-wide uppercase">
+                        Solar Array Size
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-2 text-center">
+                      <div className="text-lg font-bold text-gray-900">
+                        {assessmentSnapshotBusy ? (
+                          <span className="inline-block h-6 w-24 animate-pulse rounded bg-gray-100" />
+                        ) : persistedSizingSummary?.solarArraySize !== null && persistedSizingSummary?.solarArraySize !== undefined ? (
+                          `${persistedSizingSummary.solarArraySize.toFixed(1)} kW`
+                        ) : (
+                          "N/A"
+                        )}
+                      </div>
+                      <p className="text-[11px] text-gray-500 mt-1">From energy sizing</p>
+                    </CardContent>
+                  </Card>
+
+                  <Card className={`${panelCardClass} rounded-2xl bg-white/80`}>
+                    <CardHeader className="flex flex-col items-center pb-1">
+                      <DollarSign className="h-4 w-4 text-emerald-600" />
+                      <CardTitle className="text-[11px] font-semibold text-gray-700 text-center mt-2 tracking-wide uppercase">
+                        Annual Savings
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-2 text-center">
+                      <div className="text-lg font-bold text-gray-900">
+                        {assessmentSnapshotBusy ? (
+                          <span className="inline-block h-6 w-28 animate-pulse rounded bg-gray-100" />
+                        ) : persistedSizingSummary?.annualSavings !== null && persistedSizingSummary?.annualSavings !== undefined ? (
+                          formatCurrency(persistedSizingSummary.annualSavings)
+                        ) : (
+                          "N/A"
+                        )}
+                      </div>
+                      <p className="text-[11px] text-gray-500 mt-1">Cost savings (modelled)</p>
+                    </CardContent>
+                  </Card>
+
+                  <Card className={`${panelCardClass} rounded-2xl bg-white/80`}>
+                    <CardHeader className="flex flex-col items-center pb-1">
+                      <TrendingDown className="h-4 w-4 text-blue-600" />
+                      <CardTitle className="text-[11px] font-semibold text-gray-700 text-center mt-2 tracking-wide uppercase">
+                        Cost Comparison
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-2 text-center">
+                      <div className="text-lg font-bold text-gray-900">
+                        {assessmentSnapshotBusy ? (
+                          <span className="inline-block h-6 w-24 animate-pulse rounded bg-gray-100" />
+                        ) : monthlySavingsNetTzs !== null && monthlySavingsNetTzs !== undefined ? (
+                          formatCurrency(monthlySavingsNetTzs)
+                        ) : (
+                          "N/A"
+                        )}
+                      </div>
+                      <p className="text-[11px] text-gray-500 mt-1">Estimated monthly savings</p>
                     </CardContent>
                   </Card>
 
@@ -914,288 +1037,50 @@ export function FacilityDashboardContent({
                     </CardContent>
                   </Card>
                 </div>
-                
-                {/* Analytics sections */}
-                <div className="grid gap-4 grid-cols-1 lg:grid-cols-3">
-                  <Card className={cn(panelCardClass, "lg:col-span-2 rounded-2xl")}>
-                    <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                      <div>
-                        <CardTitle className={sectionTitleClass}>Energy Efficiency Analytics</CardTitle>
-                        <CardDescription className={metaTextClass}>
-                          Consumption, solar generation, and efficiency indicators
-                        </CardDescription>
-                      </div>
-                      <Button variant="outline" size="sm" onClick={() => setCurrentSection("energy-efficiency")}>
-                        View Energy Efficiency
-                      </Button>
-                    </CardHeader>
-                    <CardContent className="pt-2">
-                      {overviewTrends.length === 0 ? (
-                        <div className="text-sm text-gray-500 py-8 text-center">
-                          No energy trend data yet.
-                        </div>
-                      ) : (
-                        <div className="h-64">
-                          <ResponsiveContainer width="100%" height="100%">
-                            <AreaChart data={overviewTrends} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-                              <defs>
-                                <linearGradient id="consumptionGradient" x1="0" y1="0" x2="0" y2="1">
-                                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.25} />
-                                  <stop offset="95%" stopColor="#10b981" stopOpacity={0.05} />
-                                </linearGradient>
-                                <linearGradient id="solarGradient" x1="0" y1="0" x2="0" y2="1">
-                                  <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.20} />
-                                  <stop offset="95%" stopColor="#f59e0b" stopOpacity={0.04} />
-                                </linearGradient>
-                              </defs>
-                              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                              <XAxis dataKey="label" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
-                              <YAxis tick={{ fontSize: 11 }} width={36} />
-                              <Tooltip
-                                contentStyle={{ fontSize: 12, borderRadius: 12 }}
-                                formatter={(value: any, name: any) => [
-                                  Number(value).toFixed(2),
-                                  name === "consumption" ? "Consumption (kWh)" : name === "solar" ? "Solar (kWh)" : name,
-                                ]}
-                              />
-                              <Area
-                                type="monotone"
-                                dataKey="consumption"
-                                stroke="#10b981"
-                                fill="url(#consumptionGradient)"
-                                strokeWidth={2}
-                              />
-                              <Area
-                                type="monotone"
-                                dataKey="solar"
-                                stroke="#f59e0b"
-                                fill="url(#solarGradient)"
-                                strokeWidth={2}
-                              />
-                            </AreaChart>
-                          </ResponsiveContainer>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
 
-                  <Card className={cn(panelCardClass, "rounded-2xl")}>
-                    <CardHeader>
-                      <CardTitle className={sectionTitleClass}>Billing & Payments</CardTitle>
-                      <CardDescription className={metaTextClass}>Quick summary and actions</CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <div className="grid grid-cols-2 gap-3 text-sm">
-                        <div className="rounded-lg border border-gray-100 p-3">
-                          <p className={metaTextClass}>Unpaid bills</p>
-                          <p className="text-lg font-semibold text-gray-900">{billingSummary.unpaidCount}</p>
-                          <p className={metaTextClass}>
-                            Next due: {billingSummary.nextDueDate ?? "—"}
-                          </p>
-                        </div>
-                        <div className="rounded-lg border border-gray-100 p-3">
-                          <p className={metaTextClass}>Payments</p>
-                          <p className="text-lg font-semibold text-gray-900">{paymentSummary.completedCount}</p>
-                          <p className={metaTextClass}>Pending: {paymentSummary.pendingCount}</p>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 gap-3">
-                        <div className="rounded-lg border border-gray-100 p-3">
-                          <p className={metaTextClass}>Payments over time</p>
-                          <div className="h-28 mt-2">
-                            {paymentsTrend.length === 0 ? (
-                              <div className="text-xs text-gray-500 py-6 text-center">No completed payments yet.</div>
-                            ) : (
-                              <ResponsiveContainer width="100%" height="100%">
-                                <BarChart data={paymentsTrend} margin={{ top: 6, right: 8, left: 0, bottom: 0 }}>
-                                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                                  <XAxis dataKey="label" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
-                                  <YAxis tick={{ fontSize: 10 }} width={34} />
-                                  <Tooltip
-                                    contentStyle={{ fontSize: 12, borderRadius: 12 }}
-                                    formatter={(value: any) => [formatCurrency(Number(value || 0)), "Paid"]}
-                                  />
-                                  <Bar dataKey="amount" fill="#10b981" radius={[6, 6, 0, 0]} />
-                                </BarChart>
-                              </ResponsiveContainer>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="rounded-lg border border-gray-100 p-3">
-                          <p className={metaTextClass}>Bills trend</p>
-                          <div className="h-28 mt-2">
-                            {billsTrend.length === 0 ? (
-                              <div className="text-xs text-gray-500 py-6 text-center">No bills yet.</div>
-                            ) : (
-                              <ResponsiveContainer width="100%" height="100%">
-                                <BarChart data={billsTrend} margin={{ top: 6, right: 8, left: 0, bottom: 0 }}>
-                                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                                  <XAxis dataKey="label" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
-                                  <YAxis tick={{ fontSize: 10 }} width={34} />
-                                  <Tooltip
-                                    contentStyle={{ fontSize: 12, borderRadius: 12 }}
-                                    formatter={(value: any) => [formatCurrency(Number(value || 0)), "Bill"]}
-                                  />
-                                  <Bar dataKey="amount" fill="#3b82f6" radius={[6, 6, 0, 0]} />
-                                </BarChart>
-                              </ResponsiveContainer>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex gap-2">
-                        <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white" onClick={() => setCurrentSection("bills-payment")}>
-                          Open Bills & Payment
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={() => setCurrentSection("subscription")}>
-                          Subscription
-                        </Button>
-                      </div>
-                      {billingSummary.overdueCount > 0 && (
-                        <div className="text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg p-3">
-                          {billingSummary.overdueCount} bill(s) appear overdue. Please review and pay to avoid service interruption.
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                </div>
-
-                <div className="grid gap-4 grid-cols-1 lg:grid-cols-3">
-                  <Card className={cn(panelCardClass, "rounded-2xl")}>
-                    <CardHeader className="flex flex-row items-start justify-between gap-3">
-                      <div>
-                        <CardTitle className={sectionTitleClass}>Notifications</CardTitle>
-                        <CardDescription className={metaTextClass}>
-                          {facilityUnreadCount > 0 ? `${facilityUnreadCount} unread` : "All caught up"}
-                        </CardDescription>
-                      </div>
-                      <Button variant="outline" size="sm" onClick={() => setCurrentSection("notifications")}>
-                        View
-                      </Button>
-                    </CardHeader>
-                    <CardContent>
-                      {facilityNotificationsLoading ? (
-                        <div className="text-sm text-gray-500 py-6">Loading…</div>
-                      ) : facilityNotifications.length === 0 ? (
-                        <div className="text-sm text-gray-500 py-6">No notifications yet.</div>
-                      ) : (
-                        <div className="space-y-3">
-                          {facilityNotifications.slice(0, 4).map((n) => (
-                            <div key={n.id} className="border border-gray-100 rounded-lg p-3">
-                              <div className="flex items-start justify-between gap-2">
-                                <div className="min-w-0">
-                                  <p className="text-sm font-medium text-gray-900 truncate">{n.title}</p>
-                                  <p className="text-xs text-gray-500 line-clamp-2">{n.message}</p>
-                                </div>
-                                {!n.isRead && (
-                                  <span className="inline-flex h-2 w-2 rounded-full bg-green-600 mt-1 flex-shrink-0" />
-                                )}
-                              </div>
-                              <p className="text-[11px] text-gray-400 mt-2">
-                                {new Date(n.createdAt).toLocaleString()}
-                              </p>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-
-                  <Card className={cn(panelCardClass, "lg:col-span-2 rounded-2xl")}>
-                    <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                      <div>
-                        <CardTitle className={sectionTitleClass}>Carbon Credits</CardTitle>
-                        <CardDescription className={metaTextClass}>
-                          Saved CO₂ and credits over recent periods
-                        </CardDescription>
-                      </div>
-                      <Button variant="outline" size="sm" onClick={() => setCurrentSection("carbon-credits")}>
-                        Open Carbon Credits
-                      </Button>
-                    </CardHeader>
-                    <CardContent className="pt-2">
-                      {creditsSummary.chart.length === 0 ? (
-                        <div className="text-sm text-gray-500 py-8 text-center">
-                          No carbon credit records yet.
-                        </div>
-                      ) : (
-                        <div className="grid gap-4 grid-cols-1 lg:grid-cols-3">
-                          <div className="lg:col-span-1 grid gap-3">
-                            <div className="rounded-lg border border-gray-100 p-3">
-                              <p className={metaTextClass}>Total credits</p>
-                              <p className="text-lg font-semibold text-gray-900">
-                                {creditsSummary.totalCredits.toFixed(3)}
-                              </p>
-                            </div>
-                            <div className="rounded-lg border border-gray-100 p-3">
-                              <p className={metaTextClass}>Total value</p>
-                              <p className="text-lg font-semibold text-gray-900">
-                                ${creditsSummary.totalValue.toFixed(2)}
-                              </p>
-                            </div>
-                          </div>
-                          <div className="lg:col-span-2 h-56">
-                            <ResponsiveContainer width="100%" height="100%">
-                              <AreaChart data={creditsSummary.chart} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-                                <defs>
-                                  <linearGradient id="creditsGradient" x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.22} />
-                                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.05} />
-                                  </linearGradient>
-                                </defs>
-                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                                <XAxis dataKey="label" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
-                                <YAxis tick={{ fontSize: 11 }} width={36} />
-                                <Tooltip
-                                  contentStyle={{ fontSize: 12, borderRadius: 12 }}
-                                  formatter={(value: any) => [Number(value).toFixed(4), "Credits (tons)"]}
-                                />
-                                <Area type="monotone" dataKey="credits" stroke="#3b82f6" fill="url(#creditsGradient)" strokeWidth={2} />
-                              </AreaChart>
-                            </ResponsiveContainer>
-                          </div>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                </div>
-
-                <Card className={cn(panelCardClass, "rounded-2xl")}>
-                  <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                {/* Energy & Cost Insights (assessment snapshot) */}
+                <div className="space-y-4">
+                  <div className="flex items-start justify-between gap-3">
                     <div>
-                      <CardTitle className={sectionTitleClass}>Reports</CardTitle>
-                      <CardDescription className={metaTextClass}>
-                        Review facility performance and generated artifacts
-                      </CardDescription>
-                    </div>
-                    <Button variant="outline" size="sm" onClick={() => setCurrentSection("report")}>
-                      Open Report
-                    </Button>
-                  </CardHeader>
-                  <CardContent className="grid gap-3 grid-cols-1 md:grid-cols-3">
-                    <div className="rounded-lg border border-gray-100 p-3">
-                      <p className={metaTextClass}>Latest bill</p>
-                      <p className="text-sm font-semibold text-gray-900">
-                        {billingSummary.latestBillAmount != null ? formatCurrency(billingSummary.latestBillAmount) : "—"}
+                      <h3 className="text-base font-semibold text-gray-900">Energy &amp; Cost Insights</h3>
+                      <p className="text-xs text-gray-500">
+                        Load breakdown, energy mix, critical load view, cost composition, and a savings bridge—powered by your saved assessment snapshots.
                       </p>
-                      <p className={metaTextClass}>Bills: {billingSummary.totalBills}</p>
                     </div>
-                    <div className="rounded-lg border border-gray-100 p-3">
-                      <p className={metaTextClass}>Efficiency score</p>
-                      <p className="text-sm font-semibold text-gray-900">{energyEfficiencyScore}%</p>
-                      <p className={metaTextClass}>Solar share: {metrics.solarPercentage.toFixed(1)}%</p>
-                    </div>
-                    <div className="rounded-lg border border-gray-100 p-3">
-                      <p className={metaTextClass}>Unread notifications</p>
-                      <p className="text-sm font-semibold text-gray-900">{facilityUnreadCount}</p>
-                      <p className={metaTextClass}>Payments: {paymentSummary.completedCount} completed</p>
-                    </div>
-                  </CardContent>
-                </Card>
+                    {assessmentSnapshotBusy ? (
+                      <span className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">
+                        Loading from database...
+                      </span>
+                    ) : (
+                      <span className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">
+                        DB snapshot loaded
+                      </span>
+                    )}
+                  </div>
 
+                  {assessmentSnapshotBusy ? (
+                    <div className="grid gap-4 lg:grid-cols-2">
+                      {Array.from({ length: 8 }).map((_, i) => (
+                        <div
+                          key={i}
+                          className={`h-64 rounded-xl border border-gray-100 bg-gray-50 animate-pulse ${i === 4 || i === 6 ? "lg:col-span-2" : ""}`}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <IntelligenceChartGrid
+                      meu={persistedMeuSummary as MeuSummary | null}
+                      sizing={persistedSizingSummary as SizingSummary | null}
+                      facilityExtras={persistedFacilityExtras ?? undefined}
+                      resilienceScore={climateResilienceScore}
+                      recommendations={recommendations}
+                      bmiTrend={bmiTrend}
+                      variant="overview"
+                    />
+                  )}
+                </div>
+
+                {/* Billing & Payments card removed from Overview */}
               {/* Facility self-service widgets intentionally hidden for now */}
             </>)}
 
@@ -2338,98 +2223,7 @@ export function FacilityDashboardContent({
               </Card>
             )}
 
-            {currentActiveSection === 'report' && (
-              <div className="space-y-6">
-                <Card className={panelCardClass}>
-                  <CardHeader>
-                    <CardTitle className={cn("flex items-center gap-2", sectionTitleClass)}>
-                      <FileText className="w-5 h-5 text-green-600" />
-                      Energy Reports
-                    </CardTitle>
-                    <CardDescription className={metaTextClass}>Generate and download detailed energy consumption reports</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-4">
-                      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                        <Button className="h-auto p-4 flex flex-col items-start bg-green-600 hover:bg-green-700">
-                          <FileText className="w-5 h-5 mb-2" />
-                          <span className="font-semibold">Daily Report</span>
-                          <span className="text-xs opacity-90">Today's energy usage</span>
-                        </Button>
-                        <Button className="h-auto p-4 flex flex-col items-start bg-green-600 hover:bg-green-700">
-                          <FileText className="w-5 h-5 mb-2" />
-                          <span className="font-semibold">Weekly Report</span>
-                          <span className="text-xs opacity-90">Last 7 days summary</span>
-                        </Button>
-                        <Button className="h-auto p-4 flex flex-col items-start bg-green-600 hover:bg-green-700">
-                          <FileText className="w-5 h-5 mb-2" />
-                          <span className="font-semibold">Monthly Report</span>
-                          <span className="text-xs opacity-90">Full month analysis</span>
-                        </Button>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* Recent Reports */}
-                <Card className={panelCardClass}>
-                  <CardHeader>
-                    <CardTitle className={sectionTitleClass}>Recent Reports</CardTitle>
-                    <CardDescription className={metaTextClass}>Download previously generated reports</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-3">
-                      {[
-                        { id: 1, name: 'Monthly Report - February 2024', type: 'monthly', date: '2024-03-01', size: '2.4 MB' },
-                        { id: 2, name: 'Weekly Report - Week 8', type: 'weekly', date: '2024-02-25', size: '1.8 MB' },
-                        { id: 3, name: 'Daily Report - March 10, 2024', type: 'daily', date: '2024-03-10', size: '0.5 MB' },
-                      ].map((report) => (
-                        <div
-                          key={report.id}
-                          className="flex items-center justify-between p-4 border border-gray-100 rounded-lg hover:bg-gray-50 transition-colors"
-                        >
-                          <div className="flex items-center gap-3">
-                            <div className="p-2 bg-gray-100 rounded-lg">
-                              <FileText className="w-5 h-5 text-green-600" />
-                            </div>
-                            <div>
-                              <h4 className="font-medium text-gray-900">{report.name}</h4>
-                              <p className={metaTextClass}>{report.date} â€¢ {report.size}</p>
-                            </div>
-                          </div>
-                          <Button variant="outline" className="border-gray-200 text-gray-700 hover:bg-gray-50">
-                            Download
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* Report Statistics */}
-                <Card className={panelCardClass}>
-                  <CardHeader>
-                    <CardTitle className={sectionTitleClass}>Report Statistics</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid gap-3 sm:grid-cols-3">
-                      <div className="p-4 bg-gray-50 rounded-lg border border-gray-100">
-                        <p className={metaTextClass}>Total Reports</p>
-                        <p className="text-xl font-semibold text-gray-900">24</p>
-                      </div>
-                      <div className="p-4 bg-gray-50 rounded-lg border border-gray-100">
-                        <p className={metaTextClass}>This Month</p>
-                        <p className="text-xl font-semibold text-gray-900">3</p>
-                      </div>
-                      <div className="p-4 bg-gray-50 rounded-lg border border-gray-100">
-                        <p className={metaTextClass}>Last Generated</p>
-                        <p className="text-base font-medium text-gray-900">Mar 10, 2024</p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-            )}
+            {/* Report page intentionally removed */}
 
             {currentActiveSection === 'settings' && (
               <FacilitySettings facilityId={facilityId} onBack={() => setCurrentSection('overview')} />
