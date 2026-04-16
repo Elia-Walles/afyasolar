@@ -340,7 +340,9 @@ export function FacilityDashboardContent({
       const json = await res.json()
       return Array.isArray(json?.data) ? json.data : []
     },
-    enabled: !!facilityId && !adminMode,
+    // Overview Carbon Credit card must work in BOTH facility and admin mode.
+    // Backend is DB-driven from assessment snapshots, and admins are authorized to access any facility.
+    enabled: !!facilityId,
     initialData: [],
     refetchInterval: 60000,
   })
