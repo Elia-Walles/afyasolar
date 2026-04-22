@@ -131,17 +131,9 @@ export function FacilityMeterEfficiencyDashboard({
         )}
         {data && (
           <>
-            <div className="flex flex-wrap gap-2 items-center text-xs">
-              <Badge variant="outline">Payment model: {data.paymentModel}</Badge>
-              <Badge variant="outline">Data: {data.source}</Badge>
-              {data.summary.latestUnderperforming && (
-                <Badge className="bg-amber-100 text-amber-900 border-amber-200">Latest period underperforming</Badge>
-              )}
-            </div>
-            <div className="rounded-lg border border-dashed p-3 text-xs bg-amber-50/50 text-amber-950">
-              <p className="font-semibold mb-1">Billing &amp; contract context</p>
-              <p>{data.billingContext}</p>
-            </div>
+            {data.summary.latestUnderperforming && (
+              <Badge className="bg-amber-100 text-amber-900 border-amber-200">Latest period underperforming</Badge>
+            )}
             {data.alerts.length > 0 && (
               <div className="space-y-2">
                 {data.alerts.map((a, i) => (
