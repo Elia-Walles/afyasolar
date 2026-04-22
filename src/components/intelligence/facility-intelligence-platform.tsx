@@ -137,12 +137,15 @@ export function FacilityIntelligencePlatform({
   const [saveSnapshotBusy, setSaveSnapshotBusy] = useState(false)
   const { data: session } = useSession()
   const isAdmin = session?.user?.role === "admin"
+  const useFacilityScopedCycles = Boolean(facilityId)
 
   const selectedCycle = useMemo(
     () => assessmentCyclesList.find((c) => c.id === assessmentCycleId) ?? null,
     [assessmentCyclesList, assessmentCycleId]
   )
-  const assessmentReadOnly = Boolean(selectedCycle && selectedCycle.status !== "draft")
+  // Facility users can edit previously saved assessments when they need to reassess/correct.
+  // Keep historical cycles read-only for admins in review mode.
+  const assessmentReadOnly = Boolean(isAdmin && selectedCycle && selectedCycle.status !== "draft")
 
   const filteredAssessmentCycles = useMemo(() => {
     const now = Date.now()
@@ -181,7 +184,7 @@ export function FacilityIntelligencePlatform({
   }, [facilityName, isAdmin])
 
   const handleReassessConfirm = useCallback(async () => {
-    if (isAdmin || !facilityId || !assessmentCycleId) return
+    if (!facilityId || !assessmentCycleId) return
     setReassessBusy(true)
     setReassessDialogOpen(false)
     try {
@@ -221,7 +224,7 @@ export function FacilityIntelligencePlatform({
     } finally {
       setReassessBusy(false)
     }
-  }, [facilityId, assessmentCycleId, isAdmin])
+  }, [facilityId, assessmentCycleId])
 
   const handleSaveSnapshot = useCallback(async () => {
     if (!facilityId || !assessmentCycleId) return
@@ -271,14 +274,14 @@ export function FacilityIntelligencePlatform({
     ;(async () => {
       try {
         const cyclesRes = await fetch(
-          isAdmin ? `/api/assessment-cycles` : `/api/facility/${facilityId}/assessment-cycles`,
+          useFacilityScopedCycles ? `/api/facility/${facilityId}/assessment-cycles` : `/api/assessment-cycles`,
           { cache: "no-store" }
         )
         const cyclesJson = await cyclesRes.json()
         let cycles: AssessmentCycleRow[] = Array.isArray(cyclesJson?.cycles) ? cyclesJson.cycles : []
 
         let draft = cycles.find((c) => c?.status === "draft")
-        if (!draft && facilityId && !isAdmin) {
+        if (!draft && facilityId) {
           const createRes = await fetch(`/api/facility/${facilityId}/assessment-cycles`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -299,9 +302,6 @@ export function FacilityIntelligencePlatform({
           if (prev && cycles.some((c) => c.id === prev)) return prev
           return latestCompleted?.id ?? draft?.id ?? cycles[0]?.id ?? null
         })
-        // #region agent log
-        fetch('http://127.0.0.1:7272/ingest/c99fbffc-2c05-4b71-ad32-c7c14a4d90a6',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'af648d'},body:JSON.stringify({sessionId:'af648d',runId:'pre-fix',hypothesisId:'H2',location:'facility-intelligence-platform.tsx:cycles-load',message:'Loaded cycles and selected draft/latest',data:{facilityId,cyclesCount:cycles.length,draftId:draft?.id ?? null,firstCycleId:cycles[0]?.id ?? null,statuses:cycles.slice(0,5).map((c:any)=>({id:c.id,status:c.status,assessmentNumber:c.assessmentNumber ?? null}))},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
       } catch {
         if (!cancelled) {
           setAssessmentCyclesList([])
@@ -312,7 +312,7 @@ export function FacilityIntelligencePlatform({
     return () => {
       cancelled = true
     }
-  }, [facilityId, isAdmin])
+  }, [facilityId, isAdmin, useFacilityScopedCycles])
 
   // Climate scores for the selected assessment cycle
   useEffect(() => {
@@ -333,9 +333,6 @@ export function FacilityIntelligencePlatform({
         const climateRes = await fetch(`/api/assessment-cycles/${assessmentCycleId}/climate`, { cache: "no-store" })
         const climateJson = await climateRes.json()
         const score = climateJson?.score?.rcs
-        // #region agent log
-        fetch('http://127.0.0.1:7272/ingest/c99fbffc-2c05-4b71-ad32-c7c14a4d90a6',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'af648d'},body:JSON.stringify({sessionId:'af648d',runId:'pre-fix',hypothesisId:'H3',location:'facility-intelligence-platform.tsx:climate-fetch',message:'Fetched climate snapshot for selected cycle',data:{facilityId,assessmentCycleId,selectedStatus:selectedCycle?.status ?? null,httpOk:climateRes.ok,hasScore:score !== undefined && score !== null,score:score ?? null,topRisksCount:Array.isArray(climateJson?.topRisks)?climateJson.topRisks.length:0},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         if (cancelled) return
 
         if (score !== undefined && score !== null) {
@@ -392,9 +389,6 @@ export function FacilityIntelligencePlatform({
       try {
         const res = await fetch(`/api/assessment-cycles/${assessmentCycleId}/energy`, { cache: "no-store" })
         const j = await res.json()
-        // #region agent log
-        fetch('http://127.0.0.1:7272/ingest/c99fbffc-2c05-4b71-ad32-c7c14a4d90a6',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'af648d'},body:JSON.stringify({sessionId:'af648d',runId:'pre-fix',hypothesisId:'H1',location:'facility-intelligence-platform.tsx:energy-fetch',message:'Fetched energy snapshot for selected cycle',data:{facilityId,assessmentCycleId,httpOk:res.ok,hasSizingData:!!j?.sizingData,hasSizingSummary:!!j?.sizingData?.sizingSummary,hasMeuSummary:!!j?.sizingData?.meuSummary,hasOperationsData:!!j?.operationsData,opsAssessmentScore:j?.operationsData?.assessmentScore ?? null,hasBmiTrend:Array.isArray(j?.bmiTrendJson) && j.bmiTrendJson.length > 0},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         if (cancelled) return
         if (!res.ok) {
           console.error("Failed to fetch energy state:", res.status, j)
@@ -566,12 +560,6 @@ export function FacilityIntelligencePlatform({
   }, [resolvedMeuSummary, resolvedBmiSummary, climateResilienceScore, isClimateOnly, isEnergyOnly])
 
   const efficiencyScore = resolvedBmiSummary?.bmiPercent ?? null
-
-  useEffect(() => {
-    // #region agent log
-    fetch('http://127.0.0.1:7272/ingest/c99fbffc-2c05-4b71-ad32-c7c14a4d90a6',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'af648d'},body:JSON.stringify({sessionId:'af648d',runId:'pre-fix',hypothesisId:'H1',location:'facility-intelligence-platform.tsx:render-overview-state',message:'Overview state inputs after hydration',data:{facilityId,assessmentCycleId,selectedCycleStatus:selectedCycle?.status ?? null,propSizingSummary:!!sizingSummary,propMeuSummary:!!meuSummary,propBmiSummary:!!bmiSummary,energySnapshotHasSizingSummary:!!(energySnapshot as any)?.sizingData?.sizingSummary,energySnapshotHasMeuSummary:!!(energySnapshot as any)?.sizingData?.meuSummary,energySnapshotOpsScore:(energySnapshot as any)?.operationsData?.assessmentScore ?? null,persistedClimateRcs:persistedClimateScore?.rcs ?? null},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
-  }, [facilityId, assessmentCycleId, selectedCycle?.status, sizingSummary, meuSummary, bmiSummary, energySnapshot, persistedClimateScore])
 
   useEffect(() => {
     if (!facilityId || efficiencyScore == null) return
@@ -1077,7 +1065,7 @@ export function FacilityIntelligencePlatform({
                       <Database className="h-4 w-4 mr-1" aria-hidden />
                       Save to Database
                     </Button>
-                  {!assessmentReadOnly && completion.assessDone && (
+                  {!isAdmin && Boolean(assessmentCycleId) && (
                     <Button
                       type="button"
                       size="sm"
@@ -1087,7 +1075,7 @@ export function FacilityIntelligencePlatform({
                       onClick={() => setReassessDialogOpen(true)}
                     >
                       <RotateCcw className="h-4 w-4 mr-1" aria-hidden />
-                      Re-assess
+                      Reassess / Start new
                     </Button>
                   )}
                   </div>

@@ -62,10 +62,6 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
       row = null
     }
 
-    // #region agent log
-    fetch('http://127.0.0.1:7272/ingest/c99fbffc-2c05-4b71-ad32-c7c14a4d90a6',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'af648d'},body:JSON.stringify({sessionId:'af648d',runId:'pre-fix',hypothesisId:'H1',location:'assessment-cycles/[cycleId]/energy/route.ts:GET',message:'API energy snapshot returned',data:{cycleId,facilityId:gate.cycle.facilityId,hasRow:!!row,hasSizingData:!!row?.sizingData,hasSizingSummary:!!(row?.sizingData as any)?.sizingSummary,hasMeuSummary:!!(row?.sizingData as any)?.meuSummary,hasOperationsData:!!row?.operationsData,opsAssessmentScore:(row?.operationsData as any)?.assessmentScore ?? null,hasTrend:Array.isArray(row?.bmiTrendJson) && row!.bmiTrendJson.length > 0},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
-
     return NextResponse.json({
       success: true,
       facilityId: gate.cycle.facilityId,

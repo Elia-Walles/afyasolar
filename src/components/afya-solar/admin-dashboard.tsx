@@ -29,13 +29,8 @@ import {
   Save,
   BarChart3,
   Battery,
-  Gauge,
-  CloudSun,
-  Building,
 } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
-import { EnergyEfficiencyAssessment } from '@/components/energy/energy-efficiency-assessment'
-import { ClimateResilienceAssessment } from '@/components/climate/climate-resilience-assessment'
 
 interface DashboardStats {
   totalServices: number
@@ -124,7 +119,7 @@ interface DesignReport {
   createdAt: string | null
 }
 
-type AdminTabId = 'services' | 'commands' | 'packages' | 'design' | 'automation' | 'assessments'
+type AdminTabId = 'services' | 'commands' | 'packages' | 'design' | 'automation'
 
 export default function AfyaSolarAdminDashboard({ initialTab = 'services' }: { initialTab?: AdminTabId }) {
   const [stats, setStats] = useState<DashboardStats | null>(null)
@@ -174,30 +169,9 @@ export default function AfyaSolarAdminDashboard({ initialTab = 'services' }: { i
   const [designReportsLoading, setDesignReportsLoading] = useState(false)
   const [selectedReport, setSelectedReport] = useState<DesignReport | null>(null)
   
-  // Assessment states
-  const [selectedFacility, setSelectedFacility] = useState<string>('')
-  const [facilities, setFacilities] = useState<Array<{id: string, name: string, city: string, region: string}>>([])
-  const [facilitiesLoading, setFacilitiesLoading] = useState(false)
-  const [assessmentTab, setAssessmentTab] = useState<'energy-efficiency' | 'climate-resilience'>('energy-efficiency')
-
   useEffect(() => {
     fetchDashboardData()
   }, [])
-
-  // Debug effect for dialog state
-  useEffect(() => {
-    console.log('=== DIALOG STATE DEBUG ===')
-    console.log('isEditDialogOpen:', isEditDialogOpen)
-    console.log('editingPackage:', editingPackage)
-  }, [isEditDialogOpen, editingPackage])
-
-  // Debug effect for packages data
-  useEffect(() => {
-    console.log('=== PACKAGES DATA DEBUG ===')
-    console.log('packages:', packages)
-    console.log('packages.length:', packages.length)
-    console.log('loading:', loading)
-  }, [packages, loading])
 
   const fetchDashboardData = async () => {
     try {
@@ -379,29 +353,6 @@ export default function AfyaSolarAdminDashboard({ initialTab = 'services' }: { i
     })
   }, [])
   
-  // Fetch facilities for assessments
-  const fetchFacilities = async () => {
-    try {
-      setFacilitiesLoading(true)
-      const response = await fetch('/api/facilities')
-      if (!response.ok) throw new Error('Failed to fetch facilities')
-      const data = await response.json()
-      setFacilities(data.facilities || [])
-    } catch (error) {
-      console.error('Error fetching facilities:', error)
-      setFacilities([])
-    } finally {
-      setFacilitiesLoading(false)
-    }
-  }
-  
-  // Load facilities when assessments tab is first accessed
-  useEffect(() => {
-    if (facilities.length === 0 && !facilitiesLoading) {
-      fetchFacilities()
-    }
-  }, [facilities.length, facilitiesLoading])
-
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'ACTIVE': return 'bg-green-100 text-green-800'
@@ -625,7 +576,6 @@ export default function AfyaSolarAdminDashboard({ initialTab = 'services' }: { i
           <TabsTrigger value="packages">Packages</TabsTrigger>
           <TabsTrigger value="design">Design &amp; Finance</TabsTrigger>
           <TabsTrigger value="automation">Automation</TabsTrigger>
-          <TabsTrigger value="assessments">Assessments</TabsTrigger>
         </TabsList>
 
         <TabsContent value="services" className="space-y-4">
@@ -1539,122 +1489,6 @@ export default function AfyaSolarAdminDashboard({ initialTab = 'services' }: { i
           </Card>
         </TabsContent>
 
-        <TabsContent value="assessments" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Building className="w-5 h-5 text-green-600" />
-                Facility Assessments
-              </CardTitle>
-              <CardDescription>
-                Perform energy efficiency and climate resilience assessments for any facility.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Facility Selection */}
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">Select Facility</Label>
-                <Select value={selectedFacility} onValueChange={setSelectedFacility}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Choose a facility to assess...">
-                      {facilitiesLoading && (
-                        <div className="flex items-center gap-2">
-                          <div className="w-4 h-4 border-2 border-green-600 border-t-transparent rounded-full animate-spin" />
-                          <span>Loading facilities...</span>
-                        </div>
-                      )}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {facilities.map((facility) => (
-                      <SelectItem key={facility.id} value={facility.id}>
-                        <div className="flex flex-col">
-                          <span className="font-medium">{facility.name}</span>
-                          <span className="text-xs text-gray-500">{facility.city}, {facility.region}</span>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {facilities.length === 0 && !facilitiesLoading && (
-                  <p className="text-sm text-gray-500">No facilities found. Please ensure facilities are registered in the system.</p>
-                )}
-              </div>
-
-              {/* Assessment Type Selection */}
-              {selectedFacility && (
-                <div className="space-y-4">
-                  <div className="flex gap-2 p-1 bg-gray-100 rounded-lg">
-                    <button
-                      onClick={() => setAssessmentTab('energy-efficiency')}
-                      className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                        assessmentTab === 'energy-efficiency'
-                          ? 'bg-white text-green-700 shadow-sm'
-                          : 'text-gray-600 hover:text-gray-900'
-                      }`}
-                    >
-                      <Gauge className="w-4 h-4" />
-                      Energy Efficiency
-                    </button>
-                    <button
-                      onClick={() => setAssessmentTab('climate-resilience')}
-                      className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                        assessmentTab === 'climate-resilience'
-                          ? 'bg-white text-blue-700 shadow-sm'
-                          : 'text-gray-600 hover:text-gray-900'
-                      }`}
-                    >
-                      <CloudSun className="w-4 h-4" />
-                      Climate Resilience
-                    </button>
-                  </div>
-
-                  {/* Assessment Content */}
-                  <div className="mt-4">
-                    {assessmentTab === 'energy-efficiency' && (
-                      <div className="space-y-4">
-                        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                          <h3 className="font-semibold text-green-900 mb-2">Energy Efficiency Assessment</h3>
-                          <p className="text-sm text-green-700">
-                            Comprehensive assessment aligned with ISO 50001:2018 and Tanzania NEES 2024–2034.
-                          </p>
-                        </div>
-                        <div className="border border-gray-200 rounded-lg p-4">
-                          <p className="text-sm text-gray-600 mb-2">
-                            Admin assessment for facility: <strong>{facilities.find(f => f.id === selectedFacility)?.name}</strong>
-                          </p>
-                          <EnergyEfficiencyAssessment />
-                        </div>
-                      </div>
-                    )}
-                    
-                    {assessmentTab === 'climate-resilience' && (
-                      <div className="space-y-4">
-                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                          <h3 className="font-semibold text-blue-900 mb-2">Climate Resilience Assessment</h3>
-                          <p className="text-sm text-blue-700">
-                            Guided climate readiness, hazard context, adaptation tracking, and risk assessment.
-                          </p>
-                        </div>
-                        <div className="border border-gray-200 rounded-lg p-4">
-                          <p className="text-sm text-gray-600 mb-2">
-                            Admin assessment for facility: <strong>{facilities.find(f => f.id === selectedFacility)?.name}</strong>
-                          </p>
-                          <ClimateResilienceAssessment 
-                            facilityId={selectedFacility}
-                            onCapacityScoreChange={(score) => {
-                              console.log('Climate resilience capacity score:', score)
-                            }}
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
       </Tabs>
     </div>
   )

@@ -44,8 +44,6 @@ import { FacilitySettings } from "@/components/facility-settings"
 import { FeatureRequestDialog } from "@/components/dashboard/feature-request-dialog"
 import { ReferralInviteDialog } from "@/components/dashboard/referral-invite-dialog"
 import { FacilityCarbonCredits } from "@/components/dashboard/facility-carbon-credits"
-import { ManualTelemetryForm } from "@/components/energy/manual-telemetry-form"
-import { EnergyEfficiencyAssessment } from "@/components/energy/energy-efficiency-assessment"
 import { FacilityMeterEfficiencyDashboard } from "@/components/efficiency/facility-meter-efficiency-dashboard"
 import { SolarPackagesSelection } from "@/components/solar/solar-packages-selection"
 import type { SizingSummary, MeuSummary } from "@/components/solar/afya-solar-sizing-tool"
@@ -63,6 +61,8 @@ import { useSubscribe, useSubscriptions } from "@/hooks/use-subscriptions"
 import { formatCurrency } from "@/lib/utils"
 import type { Facility, LiveEnergyData } from "@/types"
 import { cn } from "@/lib/utils"
+import { getFacilityNavItems, getAfyaLinkAssessmentUrl, type NavSection } from "@/lib/dashboard/facility-nav"
+import { mapPlanTypeToPaymentPlan } from "@/lib/dashboard/afya-solar-plan-type"
 import { useRouter, useSearchParams } from "next/navigation"
 import { toast } from "sonner"
 import { ServiceAccessPaymentDialog } from "@/components/services/service-access-payment-dialog"
@@ -84,8 +84,6 @@ interface FacilityDashboardContentProps {
   onSectionChange?: (section: NavSection) => void
 }
 
-type NavSection = 'overview' | 'package-selection' | 'devices' | 'energy' | 'energy-efficiency' | 'climate-resilience' | 'bills-payment' | 'notifications' | 'carbon-credits' | 'subscription' | 'settings'
-
 interface FacilityNotification {
   id: string
   type: string
@@ -99,18 +97,6 @@ interface FacilityNotification {
   actionLabel?: string | null
   createdAt: string
 }
-
-const navItems: { id: NavSection; label: string; icon: React.ElementType }[] = [
-  { id: 'overview', label: 'Overview', icon: LayoutDashboard },
-  { id: 'package-selection', label: 'Package Selection', icon: Gift },
-  { id: 'devices', label: 'Devices', icon: Plug },
-  { id: 'energy', label: 'Energy', icon: Zap },
-  { id: 'energy-efficiency', label: 'Energy Efficiency', icon: Gauge },
-  { id: 'climate-resilience', label: 'Climate Resilience', icon: CloudSun },
-  { id: 'bills-payment', label: 'Bills & Payment', icon: Receipt },
-  { id: 'notifications', label: 'Notifications', icon: Bell },
-  { id: 'carbon-credits', label: 'Carbon Credits', icon: Leaf },
-]
 
 export function FacilityDashboardContent({ 
   facility, 
@@ -151,16 +137,6 @@ export function FacilityDashboardContent({
   const [subscribingTo, setSubscribingTo] = useState<string | null>(null)
   const [timeRange, setTimeRange] = useState<'today' | 'week' | 'month'>('today')
 
-  const mapPlanTypeToPaymentPlan = (
-    planType?: string | null
-  ): "cash" | "installment" | "paas" | undefined => {
-    const v = (planType || '').toUpperCase().trim()
-    if (v === 'CASH') return 'cash'
-    if (v === 'INSTALLMENT') return 'installment'
-    if (v === 'PAAS' || v === 'EAAS') return 'paas'
-    return undefined
-  }
-
   const openAfyaSolarPaymentDialog = () => {
     if (!afyaSolarSubscriber) {
       toast.error("No active Afya Solar package found for payments.")
@@ -174,6 +150,11 @@ export function FacilityDashboardContent({
 
     setPaymentDialogOpen(true)
   }
+
+  const canShowPayNow =
+    Boolean(afyaSolarSubscriber?.packageId) &&
+    Boolean(afyaSolarSubscriber?.packageName) &&
+    afyaSolarSubscriber?.subscriptionStatus !== "cancelled"
 
   const completedServiceAccessPayments = useMemo(() => {
     return (serviceAccessPayments || []).filter((p: any) => p?.status === 'completed')
@@ -203,15 +184,23 @@ export function FacilityDashboardContent({
     setSidebarOpen(isDesktop)
   }, [])
 
-  // Check URL parameter for deep links (only when not in admin mode)
+  // Check URL parameter for deep links (facility users); admins use parent-controlled section
   useEffect(() => {
-    if (!adminMode) {
-      const section = searchParams?.get('section')
-      if (section === 'subscription') {
-        setInternalActiveSection('subscription')
-      }
+    if (adminMode) return
+    const section = searchParams?.get('section')
+    if (section === 'subscription') {
+      setInternalActiveSection('subscription')
     }
   }, [searchParams, adminMode])
+
+  // Admin impersonation must not land on assessment workflows (URL deep links)
+  useEffect(() => {
+    if (!adminMode || !onSectionChange) return
+    const section = activeSection ?? internalActiveSection
+    if (section === "energy-efficiency" || section === "climate-resilience") {
+      onSectionChange("overview")
+    }
+  }, [adminMode, activeSection, internalActiveSection, onSectionChange])
 
   // Load facility notifications once on mount (facility users only)
   useEffect(() => {
@@ -329,6 +318,8 @@ export function FacilityDashboardContent({
   }, [energyData, timeRange])
 
   const subscribedServices = useMemo(() => [] as { label: string; href: string; icon: typeof CreditCard }[], [])
+
+  const sidebarNavItems = useMemo(() => getFacilityNavItems({ adminMode }), [adminMode])
 
   const { data: overviewCarbonCredits = [] } = useQuery({
     queryKey: ["overview-carbon-credits", facilityId],
@@ -545,17 +536,17 @@ export function FacilityDashboardContent({
   const carbonCreditEarnedCalc =
     creditsSummary.totalCredits !== null && creditsSummary.totalCredits !== undefined ? creditsSummary.totalCredits.toFixed(3) : "N/A"
 
+  const afyaLinkUrl = getAfyaLinkAssessmentUrl()
+
   return (
     <div className="h-screen bg-gray-50 flex overflow-hidden">
-      {/* Sidebar - Only show when not in admin mode */}
-      {!adminMode && (
-        <aside
-          className={cn(
-            "bg-white border-r shadow-sm transition-all duration-300 fixed lg:static inset-y-0 left-0 z-50 flex flex-col",
-            sidebarOpen ? "w-60" : "w-16",
-            mobileMenuOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
-          )}
-        >
+      <aside
+        className={cn(
+          "bg-white border-r shadow-sm transition-all duration-300 fixed lg:static inset-y-0 left-0 z-50 flex flex-col",
+          sidebarOpen ? "w-60" : "w-16",
+          mobileMenuOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
+        )}
+      >
         <div className="flex flex-col h-full">
           <div className="p-4 border-b flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -600,7 +591,7 @@ export function FacilityDashboardContent({
 
         {/* Navigation */}
         <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
-          {navItems
+          {sidebarNavItems
             .filter((item) => item.id !== 'devices' && item.id !== 'energy')
             .map((item) => {
             const Icon = item.icon
@@ -653,30 +644,34 @@ export function FacilityDashboardContent({
         </nav>
 
           <div className="p-3 border-t mt-auto space-y-1">
-            <FeatureRequestDialog
-              serviceName="afya-solar"
-              serviceDisplayName="Afya Solar"
-              trigger={
-                <Button
-                  variant="ghost"
-                  className={cn("w-full justify-center text-xs", sidebarOpen && "justify-start")}
-                >
-                  <Sparkles className="w-4 h-4 mr-2" />
-                  {sidebarOpen && <span>Request Feature</span>}
-                </Button>
-              }
-            />
-            <ReferralInviteDialog
-              trigger={
-                <Button
-                  variant="ghost"
-                  className={cn("w-full justify-center text-xs", sidebarOpen && "justify-start")}
-                >
-                  <Gift className="w-4 h-4 mr-2" />
-                  {sidebarOpen && <span>Referral Program</span>}
-                </Button>
-              }
-            />
+            {!adminMode && (
+              <>
+                <FeatureRequestDialog
+                  serviceName="afya-solar"
+                  serviceDisplayName="Afya Solar"
+                  trigger={
+                    <Button
+                      variant="ghost"
+                      className={cn("w-full justify-center text-xs", sidebarOpen && "justify-start")}
+                    >
+                      <Sparkles className="w-4 h-4 mr-2" />
+                      {sidebarOpen && <span>Request Feature</span>}
+                    </Button>
+                  }
+                />
+                <ReferralInviteDialog
+                  trigger={
+                    <Button
+                      variant="ghost"
+                      className={cn("w-full justify-center text-xs", sidebarOpen && "justify-start")}
+                    >
+                      <Gift className="w-4 h-4 mr-2" />
+                      {sidebarOpen && <span>Referral Program</span>}
+                    </Button>
+                  }
+                />
+              </>
+            )}
             <Button
               variant="ghost"
               className={cn("w-full justify-center text-xs", sidebarOpen && "justify-start")}
@@ -688,19 +683,19 @@ export function FacilityDashboardContent({
               <Settings className="w-4 h-4 mr-2" />
               {sidebarOpen && <span>Settings</span>}
             </Button>
-            <LogoutButton
-              variant="ghost"
-              className={cn("w-full justify-center text-xs", sidebarOpen && "justify-start")}
-              showIcon={false}
-              showTextOnMobile={true}
-            />
+            {!adminMode && (
+              <LogoutButton
+                variant="ghost"
+                className={cn("w-full justify-center text-xs", sidebarOpen && "justify-start")}
+                showIcon={false}
+                showTextOnMobile={true}
+              />
+            )}
           </div>
         </div>
       </aside>
-      )}
 
-      {/* Mobile Menu Overlay - Only show when not in admin mode */}
-      {!adminMode && mobileMenuOpen && (
+      {mobileMenuOpen && (
         <div
           className="fixed inset-0 z-40 bg-gradient-to-br from-emerald-900/30 via-slate-900/35 to-black/30 backdrop-blur-sm lg:hidden"
           onClick={() => setMobileMenuOpen(false)}
@@ -714,20 +709,17 @@ export function FacilityDashboardContent({
           <div className="px-4 sm:px-6 lg:px-8 py-4">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0">
-                {/* Mobile menu button - Only show when not in admin mode */}
-                {!adminMode && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => {
-                      setSidebarOpen(true)
-                      setMobileMenuOpen(true)
-                    }}
-                    className="lg:hidden"
-                  >
-                    <Menu className="w-5 h-5" />
-                  </Button>
-                )}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => {
+                    setSidebarOpen(true)
+                    setMobileMenuOpen(true)
+                  }}
+                  className="lg:hidden"
+                >
+                  <Menu className="w-5 h-5" />
+                </Button>
                 <div className="min-w-0">
                   <p className="text-xs text-gray-500 uppercase tracking-wide sr-only">
                     Energy Dashboard
@@ -1288,82 +1280,123 @@ export function FacilityDashboardContent({
 
             {currentActiveSection === 'energy-efficiency' && (
               <div className="space-y-6">
-                {facilityId && (
-                  <FacilityMeterEfficiencyDashboard facilityId={facilityId} preferMock={false} />
-                )}
-                
-
-                <Card className={panelCardClass}>
-                  <CardHeader>
-                    <CardTitle className={sectionTitleClass}>
-                      AfyaSolar Intelligence Platform
-                    </CardTitle>
-                    <CardDescription className={metaTextClass}>
-                      Overview, guided assessment, analysis charts, action plan, and reports in one workflow (v2.0).
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="p-2 sm:p-4">
-                    <FacilityIntelligencePlatform
-                      facilityId={facility?.id}
-                      facilityName={facility?.name ?? undefined}
-                      platformScope="energy"
-                      sizingSummary={sizingSummary}
-                      meuSummary={meuSummary}
-                      bmiSummary={bmiSummary}
-                      sectionScores={sectionScores}
-                      onSizingSummaryChange={setSizingSummary}
-                      onMeuSummaryChange={setMeuSummary}
-                      onBmiSummaryChange={setBmiSummary}
-                      onSectionScoresChange={setSectionScores}
-                    />
-                  </CardContent>
-                </Card>
-
-                {adminMode && facilityId && (
+                {adminMode ? (
                   <Card className={panelCardClass}>
                     <CardHeader>
-                      <CardTitle className={sectionTitleClass}>Add Manual Telemetry Sample</CardTitle>
+                      <CardTitle className={sectionTitleClass}>Energy efficiency assessments</CardTitle>
                       <CardDescription className={metaTextClass}>
-                        Admin-only tool to record a sample energy reading for this facility. Useful for testing dashboards before smart meter integration.
+                        Guided energy assessments are managed in AfyaLink. Use the Afya Solar admin hub for read-only
+                        portfolio snapshots across facilities.
                       </CardDescription>
                     </CardHeader>
-                    <CardContent>
-                      <ManualTelemetryForm facilityId={facilityId} />
+                    <CardContent className="space-y-3">
+                      {afyaLinkUrl ? (
+                        <Button asChild className="bg-green-600 hover:bg-green-700">
+                          <a href={afyaLinkUrl} target="_blank" rel="noopener noreferrer">
+                            Open AfyaLink assessments
+                          </a>
+                        </Button>
+                      ) : (
+                        <p className="text-sm text-gray-600">
+                          Configure <code className="text-xs bg-gray-100 px-1 rounded">NEXT_PUBLIC_AFYALINK_ASSESSMENT_URL</code>{" "}
+                          for a direct link to your AfyaLink workspace.
+                        </p>
+                      )}
                     </CardContent>
                   </Card>
+                ) : (
+                  <>
+                    {facilityId && (
+                      <FacilityMeterEfficiencyDashboard facilityId={facilityId} preferMock={false} />
+                    )}
+                    <Card className={panelCardClass}>
+                      <CardHeader>
+                        <CardTitle className={sectionTitleClass}>
+                          AfyaSolar Intelligence Platform
+                        </CardTitle>
+                        <CardDescription className={metaTextClass}>
+                          Overview, guided assessment, analysis charts, action plan, and reports in one workflow (v2.0).
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="p-2 sm:p-4">
+                        <FacilityIntelligencePlatform
+                          facilityId={facility?.id}
+                          facilityName={facility?.name ?? undefined}
+                          platformScope="energy"
+                          sizingSummary={sizingSummary}
+                          meuSummary={meuSummary}
+                          bmiSummary={bmiSummary}
+                          sectionScores={sectionScores}
+                          onSizingSummaryChange={setSizingSummary}
+                          onMeuSummaryChange={setMeuSummary}
+                          onBmiSummaryChange={setBmiSummary}
+                          onSectionScoresChange={setSectionScores}
+                        />
+                      </CardContent>
+                    </Card>
+                  </>
                 )}
               </div>
             )}
 
             {currentActiveSection === 'climate-resilience' && (
               <div className="space-y-6">
-                <Card className={panelCardClass}>
-                  <CardHeader>
-                    <CardTitle className={cn("flex items-center gap-2", sectionTitleClass)}>
-                      <CloudSun className="w-5 h-5 text-green-600" />
-                      Climate resilience
-                    </CardTitle>
-                    <CardDescription className={metaTextClass}>
-                      Guided climate readiness, hazard context, adaptation tracking, and saved risk drivers (same assessment
-                      cycle as Energy Efficiency).
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="p-2 sm:p-4">
-                    <FacilityIntelligencePlatform
-                      facilityId={facility?.id}
-                      facilityName={facility?.name ?? undefined}
-                      platformScope="climate"
-                      sizingSummary={sizingSummary}
-                      meuSummary={meuSummary}
-                      bmiSummary={bmiSummary}
-                      sectionScores={sectionScores}
-                      onSizingSummaryChange={setSizingSummary}
-                      onMeuSummaryChange={setMeuSummary}
-                      onBmiSummaryChange={setBmiSummary}
-                      onSectionScoresChange={setSectionScores}
-                    />
-                  </CardContent>
-                </Card>
+                {adminMode ? (
+                  <Card className={panelCardClass}>
+                    <CardHeader>
+                      <CardTitle className={cn("flex items-center gap-2", sectionTitleClass)}>
+                        <CloudSun className="w-5 h-5 text-green-600" />
+                        Climate resilience assessments
+                      </CardTitle>
+                      <CardDescription className={metaTextClass}>
+                        Guided climate assessments are managed in AfyaLink. Use the Afya Solar admin hub for read-only
+                        portfolio snapshots across facilities.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      {afyaLinkUrl ? (
+                        <Button asChild className="bg-green-600 hover:bg-green-700">
+                          <a href={afyaLinkUrl} target="_blank" rel="noopener noreferrer">
+                            Open AfyaLink assessments
+                          </a>
+                        </Button>
+                      ) : (
+                        <p className="text-sm text-gray-600">
+                          Configure <code className="text-xs bg-gray-100 px-1 rounded">NEXT_PUBLIC_AFYALINK_ASSESSMENT_URL</code>{" "}
+                          for a direct link to your AfyaLink workspace.
+                        </p>
+                      )}
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <Card className={panelCardClass}>
+                    <CardHeader>
+                      <CardTitle className={cn("flex items-center gap-2", sectionTitleClass)}>
+                        <CloudSun className="w-5 h-5 text-green-600" />
+                        Climate resilience
+                      </CardTitle>
+                      <CardDescription className={metaTextClass}>
+                        Guided climate readiness, hazard context, adaptation tracking, and saved risk drivers (same assessment
+                        cycle as Energy Efficiency).
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="p-2 sm:p-4">
+                      <FacilityIntelligencePlatform
+                        facilityId={facility?.id}
+                        facilityName={facility?.name ?? undefined}
+                        platformScope="climate"
+                        sizingSummary={sizingSummary}
+                        meuSummary={meuSummary}
+                        bmiSummary={bmiSummary}
+                        sectionScores={sectionScores}
+                        onSizingSummaryChange={setSizingSummary}
+                        onMeuSummaryChange={setMeuSummary}
+                        onBmiSummaryChange={setBmiSummary}
+                        onSectionScoresChange={setSectionScores}
+                      />
+                    </CardContent>
+                  </Card>
+                )}
               </div>
             )}
 
@@ -1459,6 +1492,16 @@ export function FacilityDashboardContent({
                                 }
                               </p>
                             </div>
+                            {canShowPayNow && (
+                              <Button
+                                size="sm"
+                                className="mt-3 bg-blue-600 hover:bg-blue-700 text-white"
+                                onClick={openAfyaSolarPaymentDialog}
+                              >
+                                <DollarSign className="w-4 h-4 mr-2" />
+                                Pay Now
+                              </Button>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -1761,7 +1804,7 @@ export function FacilityDashboardContent({
                                     onClick={openAfyaSolarPaymentDialog}
                                   >
                                     <DollarSign className="w-4 h-4 mr-2" />
-                                    Pay Subscription
+                                    Pay Now
                                   </Button>
                                 )}
                                 <Button size="sm" variant="outline" disabled>
@@ -1915,7 +1958,7 @@ export function FacilityDashboardContent({
                                         onClick={openAfyaSolarPaymentDialog}
                                       >
                                         <DollarSign className="w-4 h-4 mr-2" />
-                                        Retry Payment
+                                        Pay Now
                                       </Button>
                                     </div>
                                   </div>

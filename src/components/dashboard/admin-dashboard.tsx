@@ -55,9 +55,7 @@ import {
   Wifi,
   WifiOff,
   Thermometer,
-  Gauge,
   Leaf,
-  CloudSun,
   FileText,
   Receipt,
   Monitor,
@@ -65,6 +63,7 @@ import {
   Settings,
   Clock as ClockIcon,
   Trash2,
+  SlidersHorizontal,
 } from "lucide-react"
 import { useDeviceRequests, useUpdateDeviceRequest } from "@/hooks/use-device-requests"
 import { LogoutButton } from "@/components/logout-button"
@@ -79,9 +78,10 @@ import AdminSolarMaintenance from "@/components/solar/admin-solar-maintenance"
 import AdminSolarPerformance from "@/components/solar/admin-solar-performance"
 import AdminSolarEnergyReports from "@/components/solar/admin-solar-energy-reports"
 import AdminSolarCarbonCredits from "@/components/solar/admin-solar-carbon-credits"
-import { EnergyEfficiencyAssessment } from "@/components/energy/energy-efficiency-assessment"
-import { ClimateResilienceAssessment } from "@/components/climate/climate-resilience-assessment"
 import { FacilityCarbonCredits } from "@/components/dashboard/facility-carbon-credits"
+import { InternalSystemTools } from "@/components/admin/internal-system-tools"
+import { AdminPortfolioAssessmentSnapshots } from "@/components/afya-solar/admin-portfolio-assessment-snapshots"
+import { AdminPortfolioSolarBilling } from "@/components/afya-solar/admin-portfolio-solar-billing"
 import { useComprehensiveFacilities, type ComprehensiveFacility } from "@/hooks/use-facilities"
 import { useFacilities } from "@/hooks/use-facilities"
 import type { Facility } from "@/types"
@@ -140,13 +140,14 @@ type SectionId =
   | 'solar-performance'
   | 'solar-energy-reports'
   | 'solar-carbon-credits'
-  | 'energy-assessment'
-  | 'climate-resilient'
+  | 'afya-solar-portfolio-assessments'
+  | 'afya-solar-portfolio-billing'
   | 'transactions'
   | 'payment-transactions'
   | 'feature-requests'
   | 'referrals'
   | 'bulk-sms'
+  | 'internal-tools'
   | 'notifications'
 
 type AdminDashboardProps = {
@@ -173,6 +174,7 @@ const navGroups: Record<
       { id: 'service-visibility', label: 'Service Visibility', icon: Eye },
       { id: 'users', label: 'Users', icon: Users },
       { id: 'technicians', label: 'Technicians', icon: Wrench },
+      { id: 'internal-tools', label: 'System tools', icon: SlidersHorizontal },
       { id: 'payment-transactions', label: 'Payment Transactions', icon: CreditCard },
       { id: 'transactions', label: 'Withdrawals', icon: DollarSign },
       { id: 'feature-requests', label: 'Feature Requests', icon: Sparkles },
@@ -189,17 +191,27 @@ const navGroups: Record<
       { id: 'afya-solar-dashboard', label: 'Dashboard Overview', icon: BarChart3 },
       { id: 'afya-solar-packages', label: 'Package Management', icon: Package },
       { id: 'afya-solar-subscribers', label: 'Subscribers', icon: UserCheck },
+      { id: 'afya-solar-portfolio-assessments', label: 'Assessment snapshots', icon: BarChart3 },
+      { id: 'afya-solar-portfolio-billing', label: 'Solar billing', icon: Receipt },
       { id: 'solar-alerts', label: 'Alerts & Notifications', icon: Bell },
       { id: 'solar-carbon-credits', label: 'Carbon Credits', icon: Leaf },
-      { id: 'energy-assessment', label: 'Energy Assessment', icon: Gauge },
-      { id: 'climate-resilient', label: 'Climate Resilient', icon: CloudSun },
     ],
   },
 }
 
 // Helper to determine which group a section belongs to
 const getSectionGroup = (section: SectionId): NavGroup => {
-  if (['afya-solar-dashboard', 'afya-solar-packages', 'afya-solar-subscribers', 'solar-alerts', 'solar-carbon-credits', 'energy-assessment', 'climate-resilient'].includes(section)) {
+  if (
+    [
+      'afya-solar-dashboard',
+      'afya-solar-packages',
+      'afya-solar-subscribers',
+      'afya-solar-portfolio-assessments',
+      'afya-solar-portfolio-billing',
+      'solar-alerts',
+      'solar-carbon-credits',
+    ].includes(section)
+  ) {
     return 'afya-solar'
   }
   if (['notifications'].includes(section)) {
@@ -233,9 +245,6 @@ export function AdminDashboard({ initialSection = "overview" }: AdminDashboardPr
   const [facilityQuickViewOpen, setFacilityQuickViewOpen] = useState(false)
   const [facilityQuickView, setFacilityQuickView] = useState<ComprehensiveFacility | null>(null)
   
-  // Assessment facility selection states
-  const [energyAssessmentFacility, setEnergyAssessmentFacility] = useState<string>('')
-  const [climateResilientFacility, setClimateResilientFacility] = useState<string>('')
   const [carbonCreditsFacility, setCarbonCreditsFacility] = useState<string>('')
   const bookingFacilities: any[] = []
   const bookingFacilitiesLoading = false
@@ -962,6 +971,12 @@ export function AdminDashboard({ initialSection = "overview" }: AdminDashboardPr
                                   </div>
 
                                   <div className="mt-4 flex flex-col sm:flex-row gap-2">
+                                    <Button asChild size="sm" className="text-xs bg-blue-600 hover:bg-blue-700 text-white">
+                                      <Link href={`/dashboard/admin/facility/${facility.id}`}>
+                                        <Monitor className="w-4 h-4 mr-2" />
+                                        Open facility dashboard
+                                      </Link>
+                                    </Button>
                                     <Button
                                       size="sm"
                                       variant="outline"
@@ -1046,6 +1061,8 @@ export function AdminDashboard({ initialSection = "overview" }: AdminDashboardPr
               <TechnicianManagement />
             )}
 
+            {activeSection === 'internal-tools' && <InternalSystemTools />}
+
             {/* Payment Transactions */}
             {activeSection === 'payment-transactions' && (
               <AdminPaymentTransactions />
@@ -1098,6 +1115,10 @@ export function AdminDashboard({ initialSection = "overview" }: AdminDashboardPr
             {activeSection === 'afya-solar-subscribers' && (
               <AfyaSolarSubscribersManagement />
             )}
+
+            {activeSection === 'afya-solar-portfolio-assessments' && <AdminPortfolioAssessmentSnapshots />}
+
+            {activeSection === 'afya-solar-portfolio-billing' && <AdminPortfolioSolarBilling />}
 
             {activeSection === 'solar-live-monitoring' && (
               <AdminSolarLiveMonitoring />
@@ -1174,127 +1195,6 @@ export function AdminDashboard({ initialSection = "overview" }: AdminDashboardPr
                           <strong> {facilities?.find(f => f.id === carbonCreditsFacility)?.name}</strong>
                         </p>
                         <FacilityCarbonCredits facilityId={carbonCreditsFacility} />
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              </div>
-            )}
-
-            {activeSection === 'energy-assessment' && (
-              <div className="space-y-6">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Gauge className="w-5 h-5 text-green-600" />
-                      Energy Assessment
-                    </CardTitle>
-                    <CardDescription>
-                      Perform energy efficiency assessments for any facility in the system.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {/* Facility Selection */}
-                    <div className="space-y-2">
-                      <Label className="text-sm font-medium">Select Facility</Label>
-                      <Select value={energyAssessmentFacility} onValueChange={setEnergyAssessmentFacility}>
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Choose a facility to assess...">
-                            {isLoading && (
-                              <div className="flex items-center gap-2">
-                                <div className="w-4 h-4 border-2 border-green-600 border-t-transparent rounded-full animate-spin" />
-                                <span>Loading facilities...</span>
-                              </div>
-                            )}
-                          </SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          {facilities?.map((facility) => (
-                            <SelectItem key={facility.id} value={facility.id}>
-                              <div className="flex flex-col">
-                                <span className="font-medium">{facility.name}</span>
-                                <span className="text-xs text-gray-500">{facility.city}, {facility.region}</span>
-                              </div>
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      {facilities?.length === 0 && !isLoading && (
-                        <p className="text-sm text-gray-500">No facilities found. Please ensure facilities are registered in the system.</p>
-                      )}
-                    </div>
-
-                    {/* Assessment Content */}
-                    {energyAssessmentFacility && (
-                      <div className="border border-gray-200 rounded-lg p-4">
-                        <p className="text-sm text-gray-600 mb-4">
-                          Performing energy efficiency assessment for: 
-                          <strong> {facilities?.find(f => f.id === energyAssessmentFacility)?.name}</strong>
-                        </p>
-                        <EnergyEfficiencyAssessment />
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              </div>
-            )}
-
-            {activeSection === 'climate-resilient' && (
-              <div className="space-y-6">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <CloudSun className="w-5 h-5 text-blue-600" />
-                      Climate Resilient Assessment
-                    </CardTitle>
-                    <CardDescription>
-                      Perform climate resilience assessments for any facility in the system.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {/* Facility Selection */}
-                    <div className="space-y-2">
-                      <Label className="text-sm font-medium">Select Facility</Label>
-                      <Select value={climateResilientFacility} onValueChange={setClimateResilientFacility}>
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Choose a facility to assess...">
-                            {isLoading && (
-                              <div className="flex items-center gap-2">
-                                <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-                                <span>Loading facilities...</span>
-                              </div>
-                            )}
-                          </SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          {facilities?.map((facility) => (
-                            <SelectItem key={facility.id} value={facility.id}>
-                              <div className="flex flex-col">
-                                <span className="font-medium">{facility.name}</span>
-                                <span className="text-xs text-gray-500">{facility.city}, {facility.region}</span>
-                              </div>
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      {facilities?.length === 0 && !isLoading && (
-                        <p className="text-sm text-gray-500">No facilities found. Please ensure facilities are registered in the system.</p>
-                      )}
-                    </div>
-
-                    {/* Assessment Content */}
-                    {climateResilientFacility && (
-                      <div className="border border-gray-200 rounded-lg p-4">
-                        <p className="text-sm text-gray-600 mb-4">
-                          Performing climate resilience assessment for: 
-                          <strong> {facilities?.find(f => f.id === climateResilientFacility)?.name}</strong>
-                        </p>
-                        <ClimateResilienceAssessment 
-                          facilityId={climateResilientFacility}
-                          onCapacityScoreChange={(score) => {
-                            console.log('Climate resilience capacity score for facility', climateResilientFacility, ':', score)
-                          }}
-                        />
                       </div>
                     )}
                   </CardContent>

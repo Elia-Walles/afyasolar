@@ -2,6 +2,7 @@
 
 import { useMemo } from "react"
 import Link from "next/link"
+import { useQuery } from "@tanstack/react-query"
 import {
   Building2,
   MapPin,
@@ -63,6 +64,77 @@ export function FacilityFullDetailsPage({ facilityId }: FacilityFullDetailsPageP
     [facilities, facilityId]
   )
 
+  const { data: servicePayments = [] } = useQuery({
+    queryKey: ["admin-facility-service-payments", facilityId],
+    enabled: Boolean(facilityId),
+    queryFn: async () => {
+      const res = await fetch(`/api/service-access-payments?facilityId=${facilityId}&serviceName=afya-solar`, { cache: "no-store" })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json.error || "Failed to load service access payments")
+      return Array.isArray(json.data) ? json.data : []
+    },
+  })
+
+  const { data: invoiceRequests = [] } = useQuery({
+    queryKey: ["admin-facility-invoice-requests", facilityId],
+    enabled: Boolean(facilityId),
+    queryFn: async () => {
+      const res = await fetch("/api/admin/solar/invoice-requests?limit=500", { cache: "no-store" })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json.error || "Failed to load invoice requests")
+      const rows = Array.isArray(json.data) ? json.data : []
+      return rows.filter((row: any) => row.facilityId === facilityId)
+    },
+  })
+
+  const { data: assessmentCycles = [] } = useQuery({
+    queryKey: ["admin-facility-assessment-cycles", facilityId],
+    enabled: Boolean(facilityId),
+    queryFn: async () => {
+      const res = await fetch(`/api/facility/${facilityId}/assessment-cycles`, { cache: "no-store" })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json.error || "Failed to load assessment cycles")
+      return Array.isArray(json.cycles) ? json.cycles : []
+    },
+  })
+
+  const { data: assessmentHistory = [] } = useQuery({
+    queryKey: ["admin-facility-assessment-history", facilityId, assessmentCycles.length],
+    enabled: Boolean(facilityId) && assessmentCycles.length > 0,
+    queryFn: async () => {
+      const rows = await Promise.all(
+        assessmentCycles.slice(0, 20).map(async (cycle: any) => {
+          const [energyRes, climateRes] = await Promise.all([
+            fetch(`/api/assessment-cycles/${cycle.id}/energy`, { cache: "no-store" }),
+            fetch(`/api/assessment-cycles/${cycle.id}/climate`, { cache: "no-store" }),
+          ])
+          const energyJson = energyRes.ok ? await energyRes.json().catch(() => ({})) : {}
+          const climateJson = climateRes.ok ? await climateRes.json().catch(() => ({})) : {}
+          const efficiencyScore =
+            energyJson?.operationsData?.assessmentScore ??
+            energyJson?.sizingData?.meuSummary?.overallEfficiency ??
+            null
+          const climateScore = climateJson?.score?.rcs ?? null
+
+          return {
+            id: cycle.id,
+            status: cycle.status,
+            startedAt: cycle.startedAt,
+            completedAt: cycle.completedAt,
+            assessmentNumber: cycle.assessmentNumber ?? null,
+            efficiencyScore,
+            climateScore,
+            climateTier: climateJson?.score?.tier ?? null,
+            topRisks: Array.isArray(climateJson?.topRisks) ? climateJson.topRisks.length : 0,
+            hasEnergyData: Boolean(energyJson?.sizingData || energyJson?.operationsData),
+            hasClimateData: Boolean(climateJson?.score || (Array.isArray(climateJson?.responses) && climateJson.responses.length > 0)),
+          }
+        })
+      )
+      return rows
+    },
+  })
+
   if (isLoading || !facilities) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -107,6 +179,21 @@ export function FacilityFullDetailsPage({ facilityId }: FacilityFullDetailsPageP
     if (value === null || value === undefined) return "N/A"
     return value ? "Yes" : "No"
   }
+
+  const paymentSummary = useMemo(() => {
+    const completed = servicePayments.filter((p: any) => p.status === "completed")
+    const pendingOrFailed = servicePayments.filter((p: any) => p.status !== "completed")
+    const totalPaid = completed.reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0)
+    const latest = servicePayments[0] ?? null
+
+    return {
+      totalTransactions: servicePayments.length,
+      completedCount: completed.length,
+      pendingOrFailedCount: pendingOrFailed.length,
+      totalPaid,
+      latest,
+    }
+  }, [servicePayments])
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -258,6 +345,181 @@ export function FacilityFullDetailsPage({ facilityId }: FacilityFullDetailsPageP
                 <p className="text-xs text-gray-500 mb-1">Logo URL</p>
                 <p className="text-sm text-gray-900 truncate">{facility.logoUrl || "N/A"}</p>
               </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Receipt className="w-5 h-5 text-green-600" />
+              Package, Bills & Payment Matrix
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Current Package</p>
+                <p className="text-sm font-medium text-gray-900">
+                  {paymentSummary.latest?.packageName || "Not selected"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Current Package Plan</p>
+                <p className="text-sm text-gray-900">
+                  {paymentSummary.latest?.paymentPlan?.toUpperCase() || "N/A"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Payment Transactions</p>
+                <p className="text-sm font-semibold text-gray-900">{paymentSummary.totalTransactions}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Completed Payments</p>
+                <p className="text-sm font-semibold text-green-700">{paymentSummary.completedCount}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Pending/Failed</p>
+                <p className="text-sm font-semibold text-amber-700">{paymentSummary.pendingOrFailedCount}</p>
+              </div>
+            </div>
+
+            <Separator />
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Total Paid</p>
+                <p className="text-lg font-bold text-green-700">{formatCurrency(paymentSummary.totalPaid)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Invoice Requests</p>
+                <p className="text-lg font-bold text-blue-700">{invoiceRequests.length}</p>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <h4 className="text-sm font-semibold text-gray-900">Recent Payment Statuses</h4>
+              {servicePayments.length > 0 ? (
+                servicePayments.slice(0, 8).map((payment: any) => (
+                  <div key={payment.id} className="border rounded-lg p-3 bg-white">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-gray-900">{formatCurrency(Number(payment.amount || 0))}</p>
+                        <p className="text-xs text-gray-500">
+                          {payment.packageName || "Afya Solar"} {payment.paymentPlan ? `(${payment.paymentPlan})` : ""} •{" "}
+                          {payment.createdAt ? new Date(payment.createdAt).toLocaleString() : "N/A"}
+                        </p>
+                      </div>
+                      <Badge
+                        className={cn(
+                          "text-xs",
+                          payment.status === "completed"
+                            ? "bg-green-100 text-green-700 border-green-200"
+                            : payment.status === "failed"
+                              ? "bg-red-100 text-red-700 border-red-200"
+                              : "bg-yellow-100 text-yellow-700 border-yellow-200"
+                        )}
+                      >
+                        {String(payment.status || "pending")}
+                      </Badge>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <p className="text-sm text-gray-500">No Afya Solar payment transactions found for this facility.</p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <BarChart3 className="w-5 h-5 text-green-600" />
+              Assessment History Matrix
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div>
+                <p className="text-xs text-gray-500 mb-1">All Cycles</p>
+                <p className="text-base font-semibold text-gray-900">{assessmentCycles.length}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Completed Cycles</p>
+                <p className="text-base font-semibold text-green-700">
+                  {assessmentCycles.filter((c: any) => c.status === "completed").length}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Energy Entries</p>
+                <p className="text-base font-semibold text-blue-700">
+                  {assessmentHistory.filter((c: any) => c.hasEnergyData).length}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Climate Entries</p>
+                <p className="text-base font-semibold text-purple-700">
+                  {assessmentHistory.filter((c: any) => c.hasClimateData).length}
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              {assessmentHistory.length > 0 ? (
+                assessmentHistory.map((cycle: any) => (
+                  <div key={cycle.id} className="border rounded-lg p-3 bg-white">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-gray-900">
+                          Assessment {cycle.assessmentNumber ? `#${cycle.assessmentNumber}` : cycle.id.slice(0, 8)}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          Started: {cycle.startedAt ? new Date(cycle.startedAt).toLocaleString() : "N/A"}
+                          {cycle.completedAt ? ` • Completed: ${new Date(cycle.completedAt).toLocaleString()}` : ""}
+                        </p>
+                      </div>
+                      <Badge variant={cycle.status === "completed" ? "default" : "secondary"}>{cycle.status}</Badge>
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                      <div>
+                        <p className="text-xs text-gray-500">Energy efficiency score</p>
+                        <p className="font-semibold text-blue-700">
+                          {cycle.efficiencyScore != null ? Number(cycle.efficiencyScore).toFixed(1) : "N/A"}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500">Climate resilience score (RCS)</p>
+                        <p className="font-semibold text-purple-700">
+                          {cycle.climateScore != null ? Number(cycle.climateScore).toFixed(1) : "N/A"}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500">Top risk drivers</p>
+                        <p className="font-semibold text-gray-900">{cycle.topRisks ?? 0}</p>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Button asChild size="sm" variant="outline">
+                        <Link href={`/dashboard/admin/facility/${facilityId}?section=energy-efficiency`}>
+                          <Eye className="w-4 h-4 mr-2" />
+                          Open Energy Assessment
+                        </Link>
+                      </Button>
+                      <Button asChild size="sm" variant="outline">
+                        <Link href={`/dashboard/admin/facility/${facilityId}?section=climate-resilience`}>
+                          <Eye className="w-4 h-4 mr-2" />
+                          Open Climate Assessment
+                        </Link>
+                      </Button>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <p className="text-sm text-gray-500">No assessment cycles found for this facility.</p>
+              )}
             </div>
           </CardContent>
         </Card>

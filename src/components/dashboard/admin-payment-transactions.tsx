@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { useQuery, useMutation } from "@tanstack/react-query"
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -45,6 +45,7 @@ import {
 import { formatCurrency, cn } from "@/lib/utils"
 import { format } from "date-fns"
 import { SubscriptionCountdown } from "@/components/ui/subscription-countdown"
+import { AdminBlockingDialog } from "@/components/admin/admin-blocking-dialog"
 
 interface PaymentTransaction {
   id: string
@@ -95,6 +96,7 @@ interface TransactionResponse {
 }
 
 export function AdminPaymentTransactions() {
+  const queryClient = useQueryClient()
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [serviceFilter, setServiceFilter] = useState<string>("all")
   const [searchQuery, setSearchQuery] = useState("")
@@ -164,6 +166,14 @@ export function AdminPaymentTransactions() {
     onSuccess: (data) => {
       toast.success(data.message || 'Payment verified successfully')
       refetch()
+      queryClient.invalidateQueries({ queryKey: ["comprehensive-facilities"] })
+      queryClient.invalidateQueries({ queryKey: ["admin-overview"] })
+      queryClient.invalidateQueries({ queryKey: ["admin-active-subs"] })
+      queryClient.invalidateQueries({ queryKey: ["afya-solar-admin-financial-summary"] })
+      queryClient.invalidateQueries({ queryKey: ["afya-solar-admin-financial-transactions"] })
+      queryClient.invalidateQueries({ queryKey: ["admin-assessment-snapshot-summary"] })
+      queryClient.invalidateQueries({ queryKey: ["admin-solar-invoice-requests"] })
+      queryClient.invalidateQueries({ queryKey: ["admin-payment-transactions"] })
       // Refresh selected transaction if it's the same one
       if (selectedTransaction && data.data?.transactionId === selectedTransaction.id) {
         setSelectedTransaction({
@@ -194,6 +204,14 @@ export function AdminPaymentTransactions() {
     onSuccess: () => {
       toast.success('Transaction status updated successfully')
       refetch()
+      queryClient.invalidateQueries({ queryKey: ["comprehensive-facilities"] })
+      queryClient.invalidateQueries({ queryKey: ["admin-overview"] })
+      queryClient.invalidateQueries({ queryKey: ["admin-active-subs"] })
+      queryClient.invalidateQueries({ queryKey: ["afya-solar-admin-financial-summary"] })
+      queryClient.invalidateQueries({ queryKey: ["afya-solar-admin-financial-transactions"] })
+      queryClient.invalidateQueries({ queryKey: ["admin-assessment-snapshot-summary"] })
+      queryClient.invalidateQueries({ queryKey: ["admin-solar-invoice-requests"] })
+      queryClient.invalidateQueries({ queryKey: ["admin-payment-transactions"] })
       setShowStatusUpdateDialog(false)
       setShowDetailsDialog(false)
       setNewStatus("")
@@ -893,6 +911,12 @@ export function AdminPaymentTransactions() {
           )}
         </DialogContent>
       </Dialog>
+
+      <AdminBlockingDialog
+        open={verifyPaymentMutation.isPending || updateStatusMutation.isPending}
+        title="Updating payment"
+        description="Contacting the payment provider and refreshing records. Please wait."
+      />
     </div>
   )
 }

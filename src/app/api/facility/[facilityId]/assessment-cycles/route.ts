@@ -21,7 +21,7 @@ function isMissingAssessmentNumberColumn(error: unknown): boolean {
  * Lists assessment cycles for a facility.
  */
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ facilityId: string }> }
 ) {
   try {
@@ -35,6 +35,10 @@ export async function GET(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 })
     }
 
+    const { searchParams } = new URL(request.url)
+    const parsed = parseInt(searchParams.get("limit") || "200", 10)
+    const limit = Number.isFinite(parsed) ? Math.min(500, Math.max(1, parsed)) : 200
+
     let cycles: any[] = []
     try {
       cycles = await db
@@ -42,7 +46,7 @@ export async function GET(
         .from(assessmentCycles)
         .where(eq(assessmentCycles.facilityId, facilityId))
         .orderBy(desc(assessmentCycles.startedAt))
-        .limit(50)
+        .limit(limit)
     } catch (error) {
       if (!isMissingAssessmentNumberColumn(error)) throw error
       // Backward-compatible fallback when migration for `assessment_number` has not been applied yet.
@@ -61,13 +65,9 @@ export async function GET(
         .from(assessmentCycles)
         .where(eq(assessmentCycles.facilityId, facilityId))
         .orderBy(desc(assessmentCycles.startedAt))
-        .limit(50)
+        .limit(limit)
       cycles = fallbackCycles.map((c) => ({ ...c, assessmentNumber: null }))
     }
-
-    // #region agent log
-    fetch('http://127.0.0.1:7272/ingest/c99fbffc-2c05-4b71-ad32-c7c14a4d90a6',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'af648d'},body:JSON.stringify({sessionId:'af648d',runId:'pre-fix',hypothesisId:'H2',location:'assessment-cycles/route.ts:GET',message:'API cycles payload returned',data:{facilityId,cyclesCount:cycles.length,top:cycles.slice(0,5).map((c:any)=>({id:c.id,status:c.status,assessmentNumber:c.assessmentNumber ?? null,startedAt:c.startedAt ?? null}))},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
 
     return NextResponse.json({ success: true, cycles })
   } catch (error) {

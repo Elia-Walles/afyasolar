@@ -1,6 +1,20 @@
 import { useQuery } from '@tanstack/react-query'
 import { useSession } from 'next-auth/react'
 
+export type AfyaSolarSubscriptionPaymentHistoryRow = {
+  id: string
+  createdAt: string | Date
+  amount: string
+  currency: string
+  status: string
+  billingCycle: string
+  periodStart: string | Date
+  periodEnd: string | Date
+  isRenewal: boolean
+  transactionStatus: string | null
+  transactionId: string | null
+}
+
 export interface AfyaSolarSubscriber {
   id: string
   name: string
@@ -25,6 +39,8 @@ export interface AfyaSolarSubscriber {
   packageName?: string
   packageId?: string
   paymentStatus?: string
+  /** Present on single-facility admin subscriber detail. */
+  subscriptionPaymentHistory?: AfyaSolarSubscriptionPaymentHistoryRow[]
 }
 
 /**

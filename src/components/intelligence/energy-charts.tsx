@@ -27,7 +27,7 @@ const GREEN_LIGHT = "#86efac"
 const EMERALD = "#059669"
 const MUTED = "#e5e7eb"
 
-function ChartFallback({ message }: { message: string }) {
+export function ChartFallback({ message }: { message: string }) {
   return (
     <div className="flex h-[220px] items-center justify-center rounded-lg border border-dashed border-emerald-200 bg-emerald-50/30 text-sm text-emerald-800/80">
       {message}

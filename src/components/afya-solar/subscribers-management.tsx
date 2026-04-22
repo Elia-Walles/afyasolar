@@ -460,11 +460,11 @@ export default function AfyaSolarSubscribersManagement() {
                                 Bills & Payment
                               </button>
                               <button
-                                onClick={() => handleViewFacilityDashboard(subscriber.id, 'contract-details')}
+                                onClick={() => handleViewFacilityDashboard(subscriber.id, 'subscription')}
                                 className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 flex items-center gap-2"
                               >
                                 <FileText className="h-3 w-3" />
-                                Contract Details
+                                Subscription
                               </button>
                               <button
                                 onClick={() => handleViewFacilityDashboard(subscriber.id, 'notifications')}
@@ -474,11 +474,11 @@ export default function AfyaSolarSubscribersManagement() {
                                 Notifications & Alerts
                               </button>
                               <button
-                                onClick={() => handleViewFacilityDashboard(subscriber.id, 'report')}
+                                onClick={() => handleViewFacilityDashboard(subscriber.id, 'overview')}
                                 className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 flex items-center gap-2"
                               >
                                 <BarChart3 className="h-3 w-3" />
-                                Report
+                                Overview report
                               </button>
                             </div>
                           </div>

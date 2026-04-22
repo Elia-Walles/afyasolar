@@ -2,7 +2,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/config'
 import { db } from '@/lib/db'
-import { facilities, serviceSubscriptions, devices, energyData, subscriptionPayments } from '@/lib/db/schema'
+import {
+  facilities,
+  serviceSubscriptions,
+  devices,
+  energyData,
+  subscriptionPayments,
+  paymentTransactions,
+} from '@/lib/db/schema'
 import { eq, and, desc, sql } from 'drizzle-orm'
 
 export async function GET(
@@ -66,24 +73,55 @@ export async function GET(
       return NextResponse.json({ error: 'Subscriber not found' }, { status: 404 })
     }
 
-    // Get additional metrics
-    const lastPayment = await db
-      .select({
-        paymentDate: subscriptionPayments.createdAt,
-        amount: subscriptionPayments.amount,
-      })
-      .from(subscriptionPayments)
-      .where(eq(subscriptionPayments.subscriptionId, subscriber[0].subscriptionId))
-      .orderBy(desc(subscriptionPayments.createdAt))
-      .limit(1)
+    const subId = subscriber[0].subscriptionId
 
-    const totalEnergyResult = await db
-      .select({
-        totalConsumption: sql<number>`SUM(${energyData.energy})`,
-      })
-      .from(energyData)
-      .where(eq(energyData.deviceId, subscriber[0].smartmeterSerial))
-      .limit(1)
+    // Get additional metrics
+    const lastPayment =
+      subId != null
+        ? await db
+            .select({
+              paymentDate: subscriptionPayments.createdAt,
+              amount: subscriptionPayments.amount,
+            })
+            .from(subscriptionPayments)
+            .where(eq(subscriptionPayments.subscriptionId, subId))
+            .orderBy(desc(subscriptionPayments.createdAt))
+            .limit(1)
+        : []
+
+    const subscriptionPaymentHistory =
+      subId != null
+        ? await db
+            .select({
+              id: subscriptionPayments.id,
+              createdAt: subscriptionPayments.createdAt,
+              amount: subscriptionPayments.amount,
+              currency: subscriptionPayments.currency,
+              status: subscriptionPayments.status,
+              billingCycle: subscriptionPayments.billingCycle,
+              periodStart: subscriptionPayments.periodStart,
+              periodEnd: subscriptionPayments.periodEnd,
+              isRenewal: subscriptionPayments.isRenewal,
+              transactionStatus: paymentTransactions.status,
+              transactionId: paymentTransactions.id,
+            })
+            .from(subscriptionPayments)
+            .leftJoin(paymentTransactions, eq(paymentTransactions.id, subscriptionPayments.transactionId))
+            .where(eq(subscriptionPayments.subscriptionId, subId))
+            .orderBy(desc(subscriptionPayments.createdAt))
+            .limit(50)
+        : []
+
+    const meterSerial = subscriber[0].smartmeterSerial
+    const totalEnergyResult = meterSerial
+      ? await db
+          .select({
+            totalConsumption: sql<number>`SUM(${energyData.energy})`,
+          })
+          .from(energyData)
+          .where(eq(energyData.deviceId, meterSerial))
+          .limit(1)
+      : [{ totalConsumption: 0 as number | null }]
 
     const subscriberWithMetrics = {
       ...subscriber[0],
@@ -91,6 +129,7 @@ export async function GET(
       monthlyRevenue: lastPayment[0]?.amount,
       totalEnergyConsumption: totalEnergyResult[0]?.totalConsumption || 0,
       subscriptionStatus: subscriber[0].subscriptionStatus || 'active',
+      subscriptionPaymentHistory,
     }
 
     return NextResponse.json({

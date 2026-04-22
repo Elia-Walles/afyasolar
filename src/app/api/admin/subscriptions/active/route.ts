@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth/config"
 import { db } from "@/lib/db"
 import { facilities, serviceSubscriptions } from "@/lib/db/schema"
+import { afyaSolarSubscribers } from "@/lib/db/afyasolar-subscribers-schema"
 import { and, eq, gte, isNull, or, sql } from "drizzle-orm"
 
 export const dynamic = "force-dynamic"
@@ -34,9 +35,12 @@ export async function GET(request: NextRequest) {
         billingCycle: serviceSubscriptions.billingCycle,
         planType: serviceSubscriptions.planType,
         createdAt: serviceSubscriptions.createdAt,
+        solarPackageName: afyaSolarSubscribers.packageName,
+        solarPlanType: afyaSolarSubscribers.planType,
       })
       .from(serviceSubscriptions)
       .innerJoin(facilities, eq(serviceSubscriptions.facilityId, facilities.id))
+      .leftJoin(afyaSolarSubscribers, eq(afyaSolarSubscribers.facilityId, facilities.id))
       .where(
         and(
           eq(serviceSubscriptions.serviceName, service),
