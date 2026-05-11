@@ -14,6 +14,10 @@ import {
   generateExternalId
 } from '@/lib/payments/transaction-service'
 import { afyaSolarPackages, afyaSolarPlans, afyaSolarPlanPricing } from '@/lib/db/afya-solar-schema'
+import {
+  getContractForFacility,
+  getNextPendingEntry,
+} from '@/lib/payg-financing/queries'
 
 export const dynamic = "force-dynamic"
 export const revalidate = 0
@@ -87,8 +91,8 @@ function normalizeMobileNumber(mobile: string): string {
 }
 
 const initiatePaymentSchema = z.object({
-  serviceName: z.enum(['afya-solar', 'equipment-resale']),
-  amount: z.number().positive(),
+  serviceName: z.enum(['afya-solar', 'equipment-resale', 'payg-financing']),
+  amount: z.number().positive().optional(),
   mobile: z.string().min(9).max(15).optional(),
   accountNumber: z.string().optional(),
   provider: z.enum(['Airtel', 'Tigo', 'Mpesa', 'Halopesa']).optional(),
@@ -104,6 +108,9 @@ const initiatePaymentSchema = z.object({
   packageMetadata: z.record(z.any()).optional(), // Additional package details as JSON
   // For Equipment Resale: resale item ID
   resaleItemId: z.string().uuid().optional(),
+  // For PAYG & Financing: contract + repayment mode (server resolves the amount)
+  paygContractId: z.string().uuid().optional(),
+  paygRepaymentMode: z.enum(['installment', 'full']).optional(),
 })
 
 async function getAfyaSolarExpectedAmount(args: {
@@ -217,13 +224,90 @@ export async function POST(request: NextRequest) {
       paymentPlan,
       packageMetadata,
       resaleItemId,
+      paygContractId,
+      paygRepaymentMode,
     } = initiatePaymentSchema.parse(body)
 
     // For Afya Solar, never trust the client-provided amount.
     // Always compute expected amount from DB pricing based on package + plan.
-    let amount = clientAmount
+    let amount = clientAmount ?? 0
     let verifiedPricing: Record<string, any> | null = null
-    if (serviceName === 'afya-solar') {
+    let paygTargetEntryId: string | null = null
+    let paygResolved: {
+      contractId: string
+      mode: 'installment' | 'full'
+      targetEntryId: string | null
+      outstandingBalance: number
+    } | null = null
+
+    if (serviceName === 'payg-financing') {
+      if (!paygContractId || !paygRepaymentMode) {
+        return NextResponse.json(
+          { error: 'paygContractId and paygRepaymentMode are required for PAYG & Financing payments' },
+          { status: 400 },
+        )
+      }
+
+      const contract = await getContractForFacility(paygContractId, facilityId)
+      if (!contract) {
+        return NextResponse.json(
+          { error: 'Contract not found or not owned by this facility' },
+          { status: 403 },
+        )
+      }
+      if (contract.status !== 'active') {
+        return NextResponse.json(
+          { error: `Contract is ${contract.status}; cannot accept further payments` },
+          { status: 400 },
+        )
+      }
+
+      const outstanding = Number(contract.outstandingBalance) || 0
+      if (outstanding <= 0) {
+        return NextResponse.json(
+          { error: 'Contract has no outstanding balance' },
+          { status: 400 },
+        )
+      }
+
+      if (paygRepaymentMode === 'installment') {
+        const nextEntry = await getNextPendingEntry(paygContractId)
+        if (!nextEntry) {
+          return NextResponse.json(
+            { error: 'No pending installment found for this contract' },
+            { status: 400 },
+          )
+        }
+        amount = Math.min(Number(nextEntry.amount) || 0, outstanding)
+        paygTargetEntryId = nextEntry.id
+      } else {
+        amount = outstanding
+        paygTargetEntryId = null
+      }
+
+      if (amount <= 0) {
+        return NextResponse.json(
+          { error: 'Resolved repayment amount must be greater than zero' },
+          { status: 400 },
+        )
+      }
+
+      paygResolved = {
+        contractId: paygContractId,
+        mode: paygRepaymentMode,
+        targetEntryId: paygTargetEntryId,
+        outstandingBalance: outstanding,
+      }
+
+      console.log('[PaygFinancing][INITIATE] Resolved repayment amount', {
+        facilityId,
+        paygContractId,
+        paygRepaymentMode,
+        paygTargetEntryId,
+        amount,
+        outstanding,
+      })
+    } else if (serviceName === 'afya-solar') {
       if (!packageId || !paymentPlan) {
         return NextResponse.json(
           { error: 'packageId and paymentPlan are required for Afya Solar payments' },
@@ -274,8 +358,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if facility already has a completed payment for this service
-    // Skip this check for equipment-resale as it supports multiple payments
-    if (serviceName !== 'equipment-resale') {
+    // Skip this check for equipment-resale and payg-financing as they support multiple payments
+    if (serviceName !== 'equipment-resale' && serviceName !== 'payg-financing') {
       const existingPayment = await db
         .select()
         .from(serviceAccessPayments)
@@ -310,6 +394,14 @@ export async function POST(request: NextRequest) {
             paymentPlan,
             verifiedPricing,
             clientAmount,
+          }
+        : null),
+      ...(serviceName === 'payg-financing' && paygResolved
+        ? {
+            paygContractId: paygResolved.contractId,
+            paygRepaymentMode: paygResolved.mode,
+            paygTargetEntryId: paygResolved.targetEntryId,
+            paygOutstandingAtInitiation: paygResolved.outstandingBalance,
           }
         : null),
       timestamp: new Date().toISOString(),
@@ -361,6 +453,11 @@ export async function POST(request: NextRequest) {
     if (serviceName === 'afya-solar' && verifiedPricing) {
       metadataObj.verifiedPricing = verifiedPricing
       metadataObj.paymentPlan = paymentPlan
+    }
+    if (serviceName === 'payg-financing' && paygResolved) {
+      metadataObj.paygContractId = paygResolved.contractId
+      metadataObj.paygRepaymentMode = paygResolved.mode
+      metadataObj.paygTargetEntryId = paygResolved.targetEntryId
     }
 
     await db.insert(serviceAccessPayments).values({

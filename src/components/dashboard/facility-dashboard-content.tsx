@@ -66,6 +66,7 @@ import { mapPlanTypeToPaymentPlan } from "@/lib/dashboard/afya-solar-plan-type"
 import { useRouter, useSearchParams } from "next/navigation"
 import { toast } from "sonner"
 import { ServiceAccessPaymentDialog } from "@/components/services/service-access-payment-dialog"
+import { PaygFinancingSection } from "@/components/payg-financing/payg-financing-section"
 import {
   ResponsiveContainer,
   BarChart,
@@ -1415,6 +1416,13 @@ export function FacilityDashboardContent({
                   packageMetadata={(afyaSolarSubscriber as any)?.metadata ?? {}}
                 />
 
+                <Tabs defaultValue="bills" className="w-full">
+                  <TabsList className="grid grid-cols-2 w-full max-w-md">
+                    <TabsTrigger value="bills">Bills &amp; Subscription</TabsTrigger>
+                    <TabsTrigger value="payg">PAYG &amp; Financing</TabsTrigger>
+                  </TabsList>
+
+                  <TabsContent value="bills" className="space-y-6 mt-4">
                 {/* Bills Section */}
                 <Card className={panelCardClass}>
                   <CardHeader>
@@ -2095,6 +2103,12 @@ export function FacilityDashboardContent({
                     )}
                   </CardContent>
                 </Card>
+                  </TabsContent>
+
+                  <TabsContent value="payg" className="mt-4">
+                    <PaygFinancingSection facilityId={facilityId} />
+                  </TabsContent>
+                </Tabs>
               </div>
             )}
 

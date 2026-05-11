@@ -10,6 +10,7 @@ import {
 } from '@/lib/payments/transaction-service'
 import { createAzamPayService } from '@/lib/payments/azam-pay'
 import { sendPaymentVerificationSMS } from '@/lib/sms'
+import { applyPayment as applyPaygPayment } from '@/lib/payg-financing/queries'
 
 export const dynamic = "force-dynamic"
 export const revalidate = 0
@@ -687,6 +688,85 @@ export async function POST(request: NextRequest) {
         console.error(`[${requestId}] ❌ Error handling maintenance payment:`, maintenanceError.message)
         console.error(`[${requestId}] Error stack:`, maintenanceError.stack)
         // Don't fail the callback if maintenance payment update fails
+      }
+      console.log(`[${requestId}] =====================================================`)
+    }
+
+    // =====================================================
+    // Handle PAYG & Financing repayment completion
+    // =====================================================
+    if (
+      newStatus === 'completed' &&
+      transaction.serviceName === 'payg-financing' &&
+      updateResult.previousStatus !== 'completed'
+    ) {
+      console.log(`[${requestId}] ========== HANDLING PAYG FINANCING REPAYMENT ==========`)
+      try {
+        let metaContractId: string | undefined
+        let metaMode: 'installment' | 'full' | undefined
+        let metaTargetEntryId: string | null | undefined
+
+        // Prefer requestPayload (set at initiate time, authoritative).
+        if (transaction.requestPayload) {
+          try {
+            const reqPayload = typeof transaction.requestPayload === 'string'
+              ? JSON.parse(transaction.requestPayload)
+              : transaction.requestPayload
+            metaContractId = reqPayload?.paygContractId
+            metaMode = reqPayload?.paygRepaymentMode
+            metaTargetEntryId = reqPayload?.paygTargetEntryId ?? null
+          } catch (e: any) {
+            console.warn(`[${requestId}] Could not parse requestPayload for payg metadata:`, e.message)
+          }
+        }
+
+        // Fallback to service_access_payments.metadata if not present on transaction.
+        if (!metaContractId) {
+          const [accessPayment] = await db
+            .select()
+            .from(serviceAccessPayments)
+            .where(
+              or(
+                eq(serviceAccessPayments.transactionId, transaction.externalId),
+                transaction.azamTransactionId
+                  ? eq(serviceAccessPayments.transactionId, transaction.azamTransactionId)
+                  : undefined,
+              ),
+            )
+            .limit(1)
+          if (accessPayment?.metadata) {
+            try {
+              const md = JSON.parse(accessPayment.metadata)
+              metaContractId = md.paygContractId
+              metaMode = md.paygRepaymentMode
+              metaTargetEntryId = md.paygTargetEntryId ?? null
+            } catch (e: any) {
+              console.warn(`[${requestId}] Could not parse access payment metadata for payg:`, e.message)
+            }
+          }
+        }
+
+        if (!metaContractId || !metaMode) {
+          console.error(`[${requestId}] ❌ Missing PAYG metadata on transaction; cannot apply payment`, {
+            externalId: transaction.externalId,
+            metaContractId,
+            metaMode,
+          })
+        } else {
+          const amount = Number(transaction.amount) || 0
+          const result = await applyPaygPayment({
+            contractId: metaContractId,
+            amount,
+            mode: metaMode,
+            targetEntryId: metaTargetEntryId ?? null,
+          })
+          console.log(`[${requestId}] ✅ PAYG repayment applied:`, result)
+        }
+      } catch (paygError: any) {
+        console.error(`[${requestId}] ❌ Error applying PAYG repayment:`, paygError.message)
+        console.error(`[${requestId}] Error stack:`, paygError.stack)
+        // Don't fail the callback if PAYG apply fails; the transaction remains completed
+        // and a retry / admin tool can reconcile.
       }
       console.log(`[${requestId}] =====================================================`)
     }

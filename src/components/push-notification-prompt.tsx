@@ -99,9 +99,9 @@ export function PushNotificationPrompt() {
         isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2'
       }`}
     >
-      <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-full shadow-lg px-3 py-2 flex items-center gap-2">
-        <BellRing className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-        <span className="text-xs text-gray-800 dark:text-gray-100">
+      <div className="bg-white border border-gray-200 rounded-full shadow-lg px-3 py-2 flex items-center gap-2">
+        <BellRing className="h-4 w-4 text-emerald-600" />
+        <span className="text-xs text-gray-800">
           Allow notifications?
         </span>
         <Button
@@ -142,8 +142,8 @@ export function NotificationToggle() {
       className={`
         relative p-2 rounded-full transition-all duration-200
         ${isSubscribed 
-          ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400' 
-          : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+          ? 'bg-emerald-100 text-emerald-600' 
+          : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
         }
         ${isSubscribing ? 'opacity-50 cursor-not-allowed' : 'hover:scale-105'}
       `}
@@ -159,7 +159,7 @@ export function NotificationToggle() {
         <Bell className="h-5 w-5" />
       )}
       {isSubscribed && (
-        <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-emerald-500 rounded-full border-2 border-white dark:border-gray-900" />
+        <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-emerald-500 rounded-full border-2 border-white" />
       )}
     </button>
   )

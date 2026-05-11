@@ -564,7 +564,7 @@ export function AdminPaymentTransactions() {
                           {transaction.mobileProvider}
                         </div>
                       )}
-                      <div className="text-xs font-mono bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded border">
+                      <div className="text-xs font-mono bg-gray-100 px-2 py-0.5 rounded border">
                         {transaction.externalId.substring(0, 20)}...
                       </div>
                     </div>
