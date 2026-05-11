@@ -192,7 +192,7 @@ const navGroups: Record<
       { id: 'afya-solar-packages', label: 'Package Management', icon: Package },
       { id: 'afya-solar-subscribers', label: 'Subscribers', icon: UserCheck },
       { id: 'afya-solar-portfolio-assessments', label: 'Assessment snapshots', icon: BarChart3 },
-      { id: 'afya-solar-portfolio-billing', label: 'Solar billing', icon: Receipt },
+      { id: 'afya-solar-portfolio-billing', label: 'Bills & Payment', icon: Receipt },
       { id: 'solar-alerts', label: 'Alerts & Notifications', icon: Bell },
       { id: 'solar-carbon-credits', label: 'Carbon Credits', icon: Leaf },
     ],

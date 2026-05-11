@@ -3,7 +3,7 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/config'
 import { db } from '@/lib/db'
 import { serviceAccessPayments } from '@/lib/db/schema'
-import { eq, desc, and } from 'drizzle-orm'
+import { eq, desc, and, type SQL } from 'drizzle-orm'
 
 /**
  * GET /api/service-access-payments
@@ -18,20 +18,24 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url)
-    const facilityId = searchParams.get('facilityId') || session.user.facilityId
+    const requestedFacilityId = searchParams.get('facilityId')
+    const facilityId = requestedFacilityId || session.user.facilityId
     const serviceName = searchParams.get('serviceName')
 
-    if (!facilityId) {
+    if (!facilityId && session.user.role !== 'admin') {
       return NextResponse.json({ error: 'Facility ID required' }, { status: 400 })
     }
 
     // Check access
-    if (session.user.role !== 'admin' && session.user.facilityId !== facilityId) {
+    if (facilityId && session.user.role !== 'admin' && session.user.facilityId !== facilityId) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
     // Build query conditions
-    const conditions = [eq(serviceAccessPayments.facilityId, facilityId)]
+    const conditions: SQL[] = []
+    if (facilityId) {
+      conditions.push(eq(serviceAccessPayments.facilityId, facilityId))
+    }
     
     if (serviceName) {
       conditions.push(eq(serviceAccessPayments.serviceName, serviceName))
@@ -40,7 +44,7 @@ export async function GET(request: NextRequest) {
     const payments = await db
       .select()
       .from(serviceAccessPayments)
-      .where(and(...conditions))
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(desc(serviceAccessPayments.createdAt))
 
     return NextResponse.json({

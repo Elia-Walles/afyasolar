@@ -4,10 +4,8 @@ export function useServiceAccessPayments(facilityId?: string, serviceName?: stri
   return useQuery({
     queryKey: ['service-access-payments', facilityId, serviceName],
     queryFn: async () => {
-      if (!facilityId) return []
-      
       const params = new URLSearchParams()
-      params.append('facilityId', facilityId)
+      if (facilityId) params.append('facilityId', facilityId)
       if (serviceName) params.append('serviceName', serviceName)
 
       const response = await fetch(`/api/service-access-payments?${params.toString()}`)
@@ -17,7 +15,7 @@ export function useServiceAccessPayments(facilityId?: string, serviceName?: stri
       const result = await response.json()
       return result.data || []
     },
-    enabled: !!facilityId,
+    enabled: !!facilityId || !!serviceName,
     initialData: [],
   })
 }

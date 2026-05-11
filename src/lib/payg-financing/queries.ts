@@ -43,6 +43,32 @@ export interface FacilityScheduleRow extends RepaymentEntry {
   facilityId: string
 }
 
+export interface AdminFinancingContract extends FinancingContract {
+  facilityName: string | null
+  facilityStatus: string | null
+}
+
+export interface AdminRepaymentEntry extends RepaymentEntry {
+  facilityId: string
+  facilityName: string | null
+}
+
+export interface AdminPaygFinancingSummary {
+  contracts: AdminFinancingContract[]
+  schedule: AdminRepaymentEntry[]
+  kpis: {
+    totalOutstanding: number
+    totalPaid: number
+    nextDueAmount: number
+    nextDueDate: Date | null
+    overdueCount: number
+    activeContracts: number
+    completedContracts: number
+    defaultedContracts: number
+    totalContracts: number
+  }
+}
+
 export async function getFacilityContracts(facilityId: string): Promise<FinancingContract[]> {
   const connection = getRawConnection()
   const [rows] = await connection.query<RowDataPacket[]>(
@@ -133,6 +159,78 @@ export async function getNextPendingEntry(contractId: string): Promise<Repayment
     [contractId],
   )
   return (rows[0] as unknown as RepaymentEntry) || null
+}
+
+export async function getAdminPaygFinancingSummary(options?: {
+  facilityId?: string
+}): Promise<AdminPaygFinancingSummary> {
+  const connection = getRawConnection()
+  const facilityCondition = options?.facilityId ? 'WHERE c.customer_id = ?' : ''
+  const params = options?.facilityId ? [options.facilityId] : []
+
+  const [contractRows] = await connection.query<RowDataPacket[]>(
+    `SELECT c.id,
+            c.customer_id        AS customerId,
+            f.name               AS facilityName,
+            f.status             AS facilityStatus,
+            c.principal_issued   AS principalIssued,
+            c.interest_rate      AS interestRate,
+            c.amount_paid        AS amountPaid,
+            c.outstanding_balance AS outstandingBalance,
+            c.days_overdue       AS daysOverdue,
+            c.provision_for_defaults AS provisionForDefaults,
+            c.status,
+            c.created_at         AS createdAt,
+            c.updated_at         AS updatedAt
+       FROM accounting_financing_contracts c
+       LEFT JOIN facilities f ON f.id = c.customer_id
+      ${facilityCondition}
+   ORDER BY c.created_at DESC`,
+    params,
+  )
+
+  const [scheduleRows] = await connection.query<RowDataPacket[]>(
+    `SELECT r.id,
+            r.contract_id  AS contractId,
+            r.due_date     AS dueDate,
+            r.amount,
+            r.principal,
+            r.interest,
+            r.status,
+            r.paid_date    AS paidDate,
+            r.created_at   AS createdAt,
+            r.updated_at   AS updatedAt,
+            c.customer_id  AS facilityId,
+            f.name         AS facilityName
+       FROM accounting_repayment_entries r
+       JOIN accounting_financing_contracts c ON c.id = r.contract_id
+       LEFT JOIN facilities f ON f.id = c.customer_id
+      ${facilityCondition}
+   ORDER BY r.due_date ASC`,
+    params,
+  )
+
+  const contracts = contractRows as unknown as AdminFinancingContract[]
+  const schedule = scheduleRows as unknown as AdminRepaymentEntry[]
+  const pendingSchedule = schedule
+    .filter((entry) => entry.status !== 'paid')
+    .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
+  const next = pendingSchedule[0] || null
+  const now = Date.now()
+
+  const kpis = {
+    totalOutstanding: +contracts.reduce((sum, c) => sum + (Number(c.outstandingBalance) || 0), 0).toFixed(2),
+    totalPaid: +contracts.reduce((sum, c) => sum + (Number(c.amountPaid) || 0), 0).toFixed(2),
+    nextDueAmount: next ? Number(next.amount) || 0 : 0,
+    nextDueDate: next ? next.dueDate : null,
+    overdueCount: pendingSchedule.filter((entry) => new Date(entry.dueDate).getTime() < now).length,
+    activeContracts: contracts.filter((c) => c.status === 'active').length,
+    completedContracts: contracts.filter((c) => c.status === 'completed').length,
+    defaultedContracts: contracts.filter((c) => c.status === 'defaulted').length,
+    totalContracts: contracts.length,
+  }
+
+  return { contracts, schedule, kpis }
 }
 
 /**
