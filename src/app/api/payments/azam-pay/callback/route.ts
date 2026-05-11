@@ -110,16 +110,31 @@ export async function POST(request: NextRequest) {
     console.log('═══════════════════════════════════════════════════')
 
     // Extract transaction identifiers (Azam Pay may use different field names)
+    // NOTE: AzamPay docs say `utilityref` is OUR application's reference (PAY-xxx)
+    // while `externalreference` is supposed to mirror it. In practice some
+    // providers (e.g. Halopesa) put AzamPay's own reference into
+    // `externalreference` and leave OUR PAY-xxx ID only in `utilityref`.
+    // We therefore prefer `utilityref` when it looks like our own ID, and we
+    // always retry every candidate field below.
     const transactionId = body.transid || body.transactionId || body.reference
-    const externalReference = body.externalreference || body.externalId || body.utilityref
+    const utilityRef = body.utilityref || null
+    const rawExternalRef = body.externalreference || body.externalId || null
+    const looksLikeOurExternalId = (s?: string | null) =>
+      !!s && /^PAY[-_]/i.test(s)
+    const externalReference =
+      (looksLikeOurExternalId(utilityRef) ? utilityRef : null) ||
+      rawExternalRef ||
+      utilityRef
     const transactionStatus = body.transactionstatus || body.status
     const azamReference = body.reference
     const mnoReference = body.mnoreference
-    
+
     console.log(`[${requestId}] ========== IDENTIFIER EXTRACTION ==========`)
     console.log(`[${requestId}] Extracted identifiers:`, {
       transactionId,
       externalReference,
+      utilityRef,
+      rawExternalRef,
       azamReference,
       mnoReference,
       transactionStatus,
@@ -134,7 +149,7 @@ export async function POST(request: NextRequest) {
     })
     console.log(`[${requestId}] ==========================================`)
 
-    if (!transactionId && !externalReference) {
+    if (!transactionId && !externalReference && !utilityRef) {
       console.error(`[${requestId}] ❌ Callback missing identifiers`)
       console.error(`[${requestId}] Full body:`, JSON.stringify(body, null, 2))
       console.error(`[${requestId}] All body keys:`, Object.keys(body))
@@ -171,6 +186,37 @@ export async function POST(request: NextRequest) {
       } catch (error: any) {
         console.error(`[${requestId}] ❌ Error searching by externalReference:`, error.message, error.stack)
         searchAttempts.push({ method: 'externalReference', identifier: externalReference, found: false })
+      }
+    }
+
+    // Attempt 1b: explicitly try `utilityref` if it differs from the
+    // externalReference we already searched. Some providers (Halopesa) put
+    // AzamPay's own reference into `externalreference` and our PAY-xxx ID
+    // only into `utilityref`, so this is the most reliable fallback.
+    if (!transaction && utilityRef && utilityRef !== externalReference) {
+      console.log(`[${requestId}] 🔍 Attempt 1b: Searching by utilityref: "${utilityRef}"`)
+      try {
+        transaction = await findTransactionByReference(utilityRef)
+        const found = !!transaction
+        searchAttempts.push({
+          method: 'utilityRef',
+          identifier: utilityRef,
+          found,
+          result: transaction ? { id: transaction.id, externalId: transaction.externalId } : null,
+        })
+        console.log(`[${requestId}] ${found ? '✅' : '❌'} Search by utilityref:`, utilityRef, found ? 'FOUND' : 'NOT FOUND')
+        if (transaction) {
+          console.log(`[${requestId}] Transaction details:`, {
+            id: transaction.id,
+            externalId: transaction.externalId,
+            azamTransactionId: transaction.azamTransactionId,
+            azamReference: transaction.azamReference,
+            status: transaction.status,
+          })
+        }
+      } catch (error: any) {
+        console.error(`[${requestId}] ❌ Error searching by utilityref:`, error.message, error.stack)
+        searchAttempts.push({ method: 'utilityRef', identifier: utilityRef, found: false })
       }
     }
 
@@ -248,14 +294,17 @@ export async function POST(request: NextRequest) {
       console.log(`[${requestId}] 🔍 Attempt 4: Searching in serviceAccessPayments table`)
       try {
         const searchConditions = []
-        if (externalReference) {
-          searchConditions.push(eq(serviceAccessPayments.transactionId, externalReference))
-          console.log(`[${requestId}]   → Searching serviceAccessPayments.transactionId = "${externalReference}"`)
+        const triedIds = new Set<string>()
+        const addCondition = (id: string | null | undefined) => {
+          if (!id || triedIds.has(id)) return
+          triedIds.add(id)
+          searchConditions.push(eq(serviceAccessPayments.transactionId, id))
+          console.log(`[${requestId}]   → Searching serviceAccessPayments.transactionId = "${id}"`)
         }
-        if (transactionId) {
-          searchConditions.push(eq(serviceAccessPayments.transactionId, transactionId))
-          console.log(`[${requestId}]   → Searching serviceAccessPayments.transactionId = "${transactionId}"`)
-        }
+        addCondition(externalReference)
+        addCondition(utilityRef)
+        addCondition(transactionId)
+        addCondition(azamReference)
         
         if (searchConditions.length > 0) {
       const [accessPayment] = await db
